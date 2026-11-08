@@ -65,6 +65,41 @@ namespace ThreadFlow.Infrastructure.Persistence.Master.Migrations
                         .IsUnique();
 
                     b.ToTable("Tenants", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("10000000-0000-0000-0000-000000000001"),
+                            CloudDatabaseName = "db78629",
+                            Code = "TENANT-A",
+                            CompanySize = "Micro",
+                            CreatedAtUtc = new DateTime(2026, 11, 8, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            LocalDatabaseName = "ThreadFlow_TenantA",
+                            Name = "Tenant A - Micro Company"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-0000-0000-000000000002"),
+                            CloudDatabaseName = "db78631",
+                            Code = "TENANT-B",
+                            CompanySize = "Small",
+                            CreatedAtUtc = new DateTime(2026, 11, 8, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            LocalDatabaseName = "ThreadFlow_TenantB",
+                            Name = "Tenant B - Small Company"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-0000-0000-000000000003"),
+                            CloudDatabaseName = "db78630",
+                            Code = "TENANT-C",
+                            CompanySize = "Medium",
+                            CreatedAtUtc = new DateTime(2026, 11, 8, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            LocalDatabaseName = "ThreadFlow_TenantC",
+                            Name = "Tenant C - Medium Enterprise Company"
+                        });
                 });
 #pragma warning restore 612, 618
         }
