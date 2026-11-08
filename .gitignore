@@ -2,3 +2,5 @@
 bin/
 obj/
 *.user
+.dotnet-cli-home/
+.nuget-packages/

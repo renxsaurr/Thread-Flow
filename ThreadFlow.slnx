@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ThreadFlow.Api/ThreadFlow.Api.csproj" />
+    <Project Path="src/ThreadFlow.Application/ThreadFlow.Application.csproj" />
+    <Project Path="src/ThreadFlow.Desktop/ThreadFlow.Desktop.csproj" />
+    <Project Path="src/ThreadFlow.Domain/ThreadFlow.Domain.csproj" />
+    <Project Path="src/ThreadFlow.Infrastructure/ThreadFlow.Infrastructure.csproj" />
+    <Project Path="src/ThreadFlow.SyncWorker/ThreadFlow.SyncWorker.csproj" />
+  </Folder>
+</Solution>
