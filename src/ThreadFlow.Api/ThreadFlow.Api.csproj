@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ThreadFlow.Application\ThreadFlow.Application.csproj" />
+    <ProjectReference Include="..\ThreadFlow.Domain\ThreadFlow.Domain.csproj" />
     <ProjectReference Include="..\ThreadFlow.Infrastructure\ThreadFlow.Infrastructure.csproj" />
   </ItemGroup>
 

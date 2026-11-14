@@ -4,12 +4,13 @@
 
 ```text
 src/
-  ThreadFlow.Domain/          Business entities and rules, grouped by module
-  ThreadFlow.Application/     Use cases and contracts, grouped by module
-  ThreadFlow.Infrastructure/  Persistence, tenant routing, and sync storage
-  ThreadFlow.Api/             HTTP endpoints, authentication, and middleware
+  ThreadFlow.Domain/          Entities and business rules
+    Entities/                 ThreadFlow entity classes
+  ThreadFlow.Infrastructure/  Database access, tenant routing, and migrations
+    data/                     Master and Tenant EF Core DbContexts and design-time factories
+    Migrations/               Separate Master and Tenant migration histories
+  ThreadFlow.Api/             HTTP endpoints, application use cases, authentication, middleware, and hosted sync
   ThreadFlow.Desktop/         WinForms screens, API client, session, and theme
-  ThreadFlow.SyncWorker/      Local/cloud sync worker, push, pull, and checkpoints
 database/
   scripts/local/              Local SQL Server setup scripts
   scripts/cloud/              Cloud SQL Server setup/deployment scripts
@@ -19,7 +20,9 @@ docs/                         Architecture and project notes
 
 ## Module organization
 
-The business modules are Tenant Administration, Inventory and Purchasing, Sales and Point of Sale, Customer Service and Loyalty (CRM), Manufacturing, Human Resources, Payroll, Finance and Accounting, Management/Approvals/Reporting, and Platform Administration. Domain and Application code is grouped by these modules; shared database and transport concerns stay in Infrastructure, API, and SyncWorker.
+The business modules are Tenant Administration, Inventory and Purchasing, Sales and Point of Sale, Customer Service and Loyalty (CRM), Manufacturing, Human Resources, Payroll, Finance and Accounting, Management/Approvals/Reporting, and Platform Administration. Domain concepts are grouped by module in Domain. API controllers and use cases implement the system workflows, while Infrastructure handles database persistence and migrations. The Desktop client communicates with the API over HTTP and does not reference the API project directly.
+
+The PDF's example names `Company` and `CompanyDatabase` are represented by ThreadFlow's existing `Tenant` registry entity and its local/cloud database-name fields. Keeping that model avoids a database schema change during this folder-structure alignment. The existing Master and Tenant contexts remain separate.
 
 ## Tenant database plan
 
@@ -28,10 +31,11 @@ The business modules are Tenant Administration, Inventory and Purchasing, Sales 
 - Local and cloud environments each have a master database and a separate business database for every tenant.
 - Tenant migrations are shared across all tenant business databases; master migrations are separate.
 - Tenant routing is resolved by the application. Clients do not submit database connection strings.
+- API startup reads the Master database from `ConnectionStrings:MasterErp`; use `ConnectionStrings__MasterErp` to override it outside local development.
 
 ## Local/cloud synchronization
 
-Use a tenant-scoped application sync process with durable change queues, stable change identifiers, retry-safe delivery, checkpoints, and explicit conflict handling. Synchronize a tenant only with its own local/cloud database pair. Conflict ownership rules will be defined alongside the relevant business workflows.
+Host the planned tenant-scoped synchronization service in the API project. It should use durable change queues, stable change identifiers, retry-safe delivery, checkpoints, and explicit conflict handling. Synchronize a tenant only with its own local/cloud database pair. Conflict ownership rules will be defined alongside the relevant business workflows.
 
 ## Desktop theme
 
