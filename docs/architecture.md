@@ -9,8 +9,11 @@ src/
   ThreadFlow.Infrastructure/  Database access, tenant routing, and migrations
     data/                     Master and Tenant EF Core DbContexts and design-time factories
     Migrations/               Separate Master and Tenant migration histories
-  ThreadFlow.Api/             HTTP endpoints, application use cases, authentication, middleware, and hosted sync
-  ThreadFlow.Desktop/         WinForms screens, API client, session, and theme
+  ThreadFlow.Api/             HTTP endpoints, module workflows, authentication, middleware, and hosted sync
+    Controllers/              HTTP request and response endpoints
+    Modules/                  Module-specific workflow code, grouped by business module
+    BackgroundServices/       Hosted API services, including planned synchronization
+  ThreadFlow.WinForms/        Windows Forms screens, API client, session, and theme
 database/
   scripts/local/              Local SQL Server setup scripts
   scripts/cloud/              Cloud SQL Server setup/deployment scripts
@@ -20,7 +23,7 @@ docs/                         Architecture and project notes
 
 ## Module organization
 
-The business modules are Tenant Administration, Inventory and Purchasing, Sales and Point of Sale, Customer Service and Loyalty (CRM), Manufacturing, Human Resources, Payroll, Finance and Accounting, Management/Approvals/Reporting, and Platform Administration. Domain concepts are grouped by module in Domain. API controllers and use cases implement the system workflows, while Infrastructure handles database persistence and migrations. The Desktop client communicates with the API over HTTP and does not reference the API project directly.
+The business modules are Tenant Administration, Inventory and Purchasing, Sales and Point of Sale, Customer Service and Loyalty (CRM), Manufacturing, Human Resources, Payroll, Finance and Accounting, Management/Approvals/Reporting, and Platform Administration. Domain concepts are grouped by module in their namespaces. API controllers handle HTTP requests and module workflows implement the operations; Infrastructure handles database persistence and migrations. The WinForms client communicates with the API over HTTP and does not reference the API project directly.
 
 The PDF's example names `Company` and `CompanyDatabase` are represented by ThreadFlow's existing `Tenant` registry entity and its local/cloud database-name fields. Keeping that model avoids a database schema change during this folder-structure alignment. The existing Master and Tenant contexts remain separate.
 
@@ -39,4 +42,4 @@ Host the planned tenant-scoped synchronization service in the API project. It sh
 
 ## Desktop theme
 
-The existing color token classes are kept in `ThreadFlow.Desktop/Theme/Colors`. `ThreadFlowTheme` builds on the existing `Pallets` class and applies the shared palette to forms and controls. New screens should call `ThreadFlowTheme.Apply(this)` after initialization.
+The existing color token classes are kept in `ThreadFlow.WinForms/Theme/Colors`. `ThreadFlowTheme` builds on the existing `Pallets` class and applies the shared palette to forms and controls. New screens should call `ThreadFlowTheme.Apply(this)` after initialization.

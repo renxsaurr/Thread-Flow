@@ -1,4 +1,4 @@
-namespace ThreadFlow.Desktop.Theme.Colors;
+namespace ThreadFlow.WinForms.Theme.Colors;
 
 /// Semantic color assignments for the ThreadFlow ERP and CRM interface.
 public sealed class Pallets

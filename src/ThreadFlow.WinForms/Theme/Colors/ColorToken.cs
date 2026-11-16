@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Text.RegularExpressions;
 
-namespace ThreadFlow.Desktop.Theme.Colors;
+namespace ThreadFlow.WinForms.Theme.Colors;
 
 public sealed class ColorToken
 {

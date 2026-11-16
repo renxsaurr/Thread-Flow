@@ -4,3 +4,49 @@ GET {{ThreadFlow.Api_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+POST {{ThreadFlow.Api_HostAddress}}/api/customer-interactions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "customerId": null,
+  "type": "Inquiry",
+  "subject": "Product availability",
+  "details": "I would like to know whether this item is available in another size."
+}
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/customer-interactions
+Accept: application/json
+
+###
+
+POST {{ThreadFlow.Api_HostAddress}}/api/sales
+Content-Type: application/json
+Accept: application/json
+
+{
+  "branchId": "094BE935-7560-45C7-BC8C-67EA3B577F0A",
+  "customerId": null,
+  "lines": [
+    {
+      "productId": "10C506DA-B775-413B-9619-EB6F00837D8C",
+      "quantity": 2
+    },
+    {
+      "productId": "17337B71-645F-4F7E-8009-728B41787DBC",
+      "quantity": 1
+    }
+  ]
+}
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/reports/sales?fromUtc=2026-11-16T00:00:00Z&toUtcExclusive=2026-11-17T00:00:00Z
+Accept: application/json
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/sales/catalog
+Accept: application/json

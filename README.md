@@ -6,8 +6,8 @@ ThreadFlow is a multi-tenant ERP system with CRM capabilities, organized into th
 
 - `ThreadFlow.Domain` - business entities and rules
 - `ThreadFlow.Infrastructure` - database contexts in `data`, plus separate Master and Tenant migrations
-- `ThreadFlow.Api` - HTTP API, application use cases, and hosted background synchronization
-- `ThreadFlow.Desktop` - WinForms user interface and shared theme
+- `ThreadFlow.Api` - HTTP API, module workflows, and hosted background synchronization
+- `ThreadFlow.WinForms` - Windows Forms user interface and shared theme
 
 ## Database plan
 

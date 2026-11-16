@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ThreadFlow.Api/ThreadFlow.Api.csproj" />
-    <Project Path="src/ThreadFlow.Desktop/ThreadFlow.Desktop.csproj" />
+    <Project Path="src/ThreadFlow.WinForms/ThreadFlow.WinForms.csproj" />
     <Project Path="src/ThreadFlow.Domain/ThreadFlow.Domain.csproj" />
     <Project Path="src/ThreadFlow.Infrastructure/ThreadFlow.Infrastructure.csproj" />
   </Folder>

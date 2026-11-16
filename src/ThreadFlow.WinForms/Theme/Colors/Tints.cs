@@ -1,4 +1,4 @@
-namespace ThreadFlow.Desktop.Theme.Colors;
+namespace ThreadFlow.WinForms.Theme.Colors;
 
 /// Brand Blue mixed with white
 public sealed class Tints

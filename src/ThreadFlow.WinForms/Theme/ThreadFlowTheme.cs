@@ -1,6 +1,6 @@
-using ThreadFlow.Desktop.Theme.Colors;
+using ThreadFlow.WinForms.Theme.Colors;
 
-namespace ThreadFlow.Desktop.Theme;
+namespace ThreadFlow.WinForms.Theme;
 
 /// <summary>
 /// Central WinForms theme built from the project's existing color tokens.

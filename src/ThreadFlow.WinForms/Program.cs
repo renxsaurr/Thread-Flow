@@ -1,4 +1,4 @@
-namespace ThreadFlow.Desktop
+namespace ThreadFlow.WinForms
 {
     internal static class Program
     {

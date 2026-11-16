@@ -1,4 +1,4 @@
-namespace ThreadFlow.Desktop
+namespace ThreadFlow.WinForms
 {
     partial class Form1
     {
