@@ -7,4 +7,7 @@ public sealed class Product
     public string Name { get; set; } = string.Empty;
     public decimal UnitPrice { get; set; }
     public bool IsActive { get; set; } = true;
+    public string Color { get; set; } = string.Empty;
+    public string Size { get; set; } = string.Empty;
+    public Guid? SupplierId { get; set; }
 }

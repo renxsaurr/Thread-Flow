@@ -7,6 +7,7 @@ public sealed class Tenant
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string CompanySize { get; set; } = "Micro";
+    public Guid DatabaseGroupId { get; set; }
     public bool IsActive { get; set; } = true;
     public string LocalDatabaseName { get; set; } = string.Empty;
     public string CloudDatabaseName { get; set; } = string.Empty;

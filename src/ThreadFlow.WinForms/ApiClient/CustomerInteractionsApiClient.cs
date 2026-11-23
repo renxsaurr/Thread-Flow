@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 
 namespace ThreadFlow.WinForms.ApiClient;
 
@@ -12,6 +12,7 @@ public sealed class CustomerInteractionsApiClient
     public async Task<List<CustomerInteractionDto>> GetAllAsync(
         CancellationToken cancellationToken = default)
     {
+        ApiSession.ApplyAuthorization(Http);
         return await Http.GetFromJsonAsync<List<CustomerInteractionDto>>(
             "api/customer-interactions",
             cancellationToken) ?? [];
@@ -21,6 +22,7 @@ public sealed class CustomerInteractionsApiClient
         CreateCustomerInteractionRequest request,
         CancellationToken cancellationToken = default)
     {
+        ApiSession.ApplyAuthorization(Http);
         using var response = await Http.PostAsJsonAsync(
             "api/customer-interactions",
             request,
@@ -49,6 +51,7 @@ public sealed record CreateCustomerInteractionRequest(
 
 public sealed record CustomerInteractionDto(
     Guid Id,
+    Guid? BranchId,
     Guid? CustomerId,
     string Type,
     string Status,

@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 
 namespace ThreadFlow.WinForms.ApiClient;
 
@@ -10,10 +10,27 @@ public sealed class SalesApiClient
     };
 
     public async Task<SalesCatalogDto> GetCatalogAsync(
+        Guid? branchId = null,
+        string? searchTerm = null,
         CancellationToken cancellationToken = default)
     {
+        ApiSession.ApplyAuthorization(Http);
+        var queryParts = new List<string>();
+
+        if (branchId is Guid selectedBranchId)
+            queryParts.Add($"branchId={selectedBranchId}");
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+            queryParts.Add(
+                $"searchTerm={Uri.EscapeDataString(searchTerm.Trim())}");
+
+        var requestUri = "api/sales/catalog";
+
+        if (queryParts.Count > 0)
+            requestUri += "?" + string.Join("&", queryParts);
+
         return await Http.GetFromJsonAsync<SalesCatalogDto>(
-            "api/sales/catalog",
+            requestUri,
             cancellationToken)
             ?? throw new InvalidOperationException(
                 "The API returned an empty sales catalog.");
@@ -23,6 +40,7 @@ public sealed class SalesApiClient
         CreateSaleRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        ApiSession.ApplyAuthorization(Http);
         using var response = await Http.PostAsJsonAsync(
             "api/sales",
             request,
@@ -56,14 +74,19 @@ public sealed record SalesProductDto(
     Guid Id,
     string Sku,
     string Name,
-    decimal UnitPrice);
+    string Color,
+    string Size,
+    decimal UnitPrice,
+    int QuantityOnHand);
 
 public sealed record CreateSaleRequestDto(
     Guid BranchId,
     Guid? CustomerId,
-    IReadOnlyList<CreateSaleLineRequestDto> Lines);
+    IReadOnlyList<CreateSaleLineRequestDto> Lines,
+    IReadOnlyList<CreateSalePaymentRequestDto> Payments);
 
 public sealed record CreateSaleLineRequestDto(Guid ProductId, int Quantity);
+public sealed record CreateSalePaymentRequestDto(string Method, decimal Amount);
 
 public sealed record SaleDto(
     Guid Id,
@@ -72,10 +95,16 @@ public sealed record SaleDto(
     Guid? CustomerId,
     DateTime OccurredAtUtc,
     decimal TotalAmount,
-    IReadOnlyList<SaleLineDto> Lines);
+    IReadOnlyList<SaleLineDto> Lines,
+    IReadOnlyList<SalePaymentDto> Payments);
 
 public sealed record SaleLineDto(
     Guid ProductId,
     int Quantity,
     decimal UnitPrice,
     decimal LineTotal);
+
+public sealed record SalePaymentDto(
+    string Method,
+    decimal Amount,
+    DateTime PaidAtUtc);

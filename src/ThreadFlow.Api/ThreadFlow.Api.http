@@ -38,6 +38,12 @@ Accept: application/json
       "productId": "17337B71-645F-4F7E-8009-728B41787DBC",
       "quantity": 1
     }
+  ],
+  "payments": [
+    {
+      "method": "Cash",
+      "amount": 2497.00
+    }
   ]
 }
 
@@ -49,4 +55,44 @@ Accept: application/json
 ###
 
 GET {{ThreadFlow.Api_HostAddress}}/api/sales/catalog
+Accept: application/json
+
+###
+POST {{ThreadFlow.Api_HostAddress}}/api/sales
+Content-Type: application/json
+Accept: application/json
+
+{
+  "branchId": "094be935-7560-45c7-bc8c-67ea3b577f0a",
+  "customerId": null,
+  "lines": [
+    {
+      "productId": "10c506da-b775-413b-9619-eb6f00837d8c",
+      "quantity": 999
+    }
+  ],
+  "payments": [
+    {
+      "method": "Cash",
+      "amount": 598401.00
+    }
+  ]
+}
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/customer-interactions
+X-Tenant-Code: TENANT-A
+Accept: application/json
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/customer-interactions
+X-Tenant-Code: TENANT-B
+Accept: application/json
+
+###
+
+GET {{ThreadFlow.Api_HostAddress}}/api/customer-interactions
+X-Tenant-Code: TENANT-C
 Accept: application/json

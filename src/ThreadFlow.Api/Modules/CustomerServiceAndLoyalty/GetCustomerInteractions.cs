@@ -7,10 +7,14 @@ namespace ThreadFlow.Api.Modules.CustomerServiceAndLoyalty;
 public sealed class GetCustomerInteractions(TenantDbContext db)
 {
     public Task<List<CustomerInteraction>> ExecuteAsync(
+        Guid? branchId,
         CancellationToken cancellationToken = default)
     {
-        return db.CustomerInteractions
-            .AsNoTracking()
+        var query = db.CustomerInteractions.AsNoTracking();
+        if (branchId is Guid selectedBranchId)
+            query = query.Where(interaction => interaction.BranchId == selectedBranchId);
+
+        return query
             .OrderByDescending(interaction => interaction.SubmittedAtUtc)
             .Take(100)
             .ToListAsync(cancellationToken);

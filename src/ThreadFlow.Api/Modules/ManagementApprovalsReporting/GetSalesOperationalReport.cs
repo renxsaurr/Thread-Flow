@@ -5,7 +5,8 @@ namespace ThreadFlow.Api.Modules.ManagementApprovalsReporting;
 
 public sealed record GetSalesOperationalReportQuery(
     DateTimeOffset FromUtc,
-    DateTimeOffset ToUtcExclusive);
+    DateTimeOffset ToUtcExclusive,
+    Guid? BranchId = null);
 
 public sealed record SalesOperationalReport(
     DateTime FromUtc,
@@ -34,6 +35,18 @@ public sealed class GetSalesOperationalReport(TenantDbContext db)
                 sale.OccurredAtUtc >= fromUtc &&
                 sale.OccurredAtUtc < toUtcExclusive);
 
+        if (query.BranchId is Guid branchId)
+        {
+            if (!await db.Branches.AnyAsync(
+                    branch => branch.Id == branchId && branch.IsActive,
+                    cancellationToken))
+            {
+                throw new ArgumentException("The selected branch does not exist or is inactive.");
+            }
+
+            salesInPeriod = salesInPeriod.Where(sale => sale.BranchId == branchId);
+        }
+
         var saleCount = await salesInPeriod.CountAsync(cancellationToken);
 
         var totalSalesAmount =
@@ -48,6 +61,7 @@ public sealed class GetSalesOperationalReport(TenantDbContext db)
                 join sale in db.Sales on line.SaleId equals sale.Id
                 where sale.OccurredAtUtc >= fromUtc &&
                       sale.OccurredAtUtc < toUtcExclusive
+                where query.BranchId == null || sale.BranchId == query.BranchId
                 select (int?)line.Quantity
             ).SumAsync(cancellationToken)
             ?? 0;

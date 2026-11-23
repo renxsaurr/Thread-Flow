@@ -9,6 +9,7 @@ public sealed class Sale
     public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
     public decimal TotalAmount { get; set; }
     public List<SaleLine> Lines { get; set; } = [];
+    public List<SalePayment> Payments { get; set; } = [];
 }
 
 public sealed class SaleLine

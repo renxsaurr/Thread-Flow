@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 
 namespace ThreadFlow.WinForms.ApiClient;
 
@@ -12,12 +12,16 @@ public sealed class SalesReportsApiClient
     public async Task<SalesOperationalReportDto> GetSalesReportAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtcExclusive,
+        Guid? branchId = null,
         CancellationToken cancellationToken = default)
     {
+        ApiSession.ApplyAuthorization(Http);
         var requestUri =
             "api/reports/sales?" +
             $"fromUtc={FormatQueryValue(fromUtc)}&" +
             $"toUtcExclusive={FormatQueryValue(toUtcExclusive)}";
+        if (branchId is Guid selectedBranchId)
+            requestUri += $"&branchId={selectedBranchId}";
 
         using var response = await Http.GetAsync(requestUri, cancellationToken);
 

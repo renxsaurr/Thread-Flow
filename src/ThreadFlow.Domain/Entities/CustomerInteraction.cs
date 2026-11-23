@@ -18,6 +18,7 @@ public sealed class CustomerInteraction
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? CustomerId { get; set; }
+    public Guid? BranchId { get; set; }
     public InteractionType Type { get; set; }
     public InteractionStatus Status { get; set; } = InteractionStatus.Open;
     public string Subject { get; set; } = string.Empty;

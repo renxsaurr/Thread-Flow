@@ -5,6 +5,7 @@ using ThreadFlow.Infrastructure.data.Tenant;
 namespace ThreadFlow.Api.Modules.CustomerServiceAndLoyalty;
 
 public sealed record CreateCustomerInteractionCommand(
+    Guid? BranchId,
     Guid? CustomerId,
     InteractionType Type,
     string Subject,
@@ -38,6 +39,7 @@ public sealed class CreateCustomerInteraction(TenantDbContext db)
 
         var interaction = new CustomerInteraction
         {
+            BranchId = command.BranchId,
             CustomerId = command.CustomerId,
             Type = command.Type,
             Subject = subject,
