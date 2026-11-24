@@ -106,11 +106,77 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.Property<int>("QuantityOnHand")
                         .HasColumnType("int");
 
+                    b.Property<int>("ReorderLevel")
+                        .HasColumnType("int");
+
                     b.HasKey("BranchId", "ProductId");
 
                     b.HasIndex("ProductId");
 
                     b.ToTable("BranchProductStocks", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.InventoryStockMovement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DestinationBranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PerformedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("QuantityChange")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DestinationBranchId");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("BranchId", "OccurredAtUtc");
+
+                    b.ToTable("InventoryStockMovements", (string)null);
                 });
 
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.InventoryStockReceipt", b =>
@@ -151,6 +217,88 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.HasIndex("BranchId", "ReceivedAtUtc");
 
                     b.ToTable("InventoryStockReceipts", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ExpectedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("OrderedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("BranchId", "CreatedAtUtc");
+
+                    b.ToTable("PurchaseOrders", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrderLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("QuantityOrdered")
+                        .HasColumnType("int");
+
+                    b.Property<int>("QuantityReceived")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.ToTable("PurchaseOrderLines", (string)null);
                 });
 
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.Supplier", b =>
@@ -391,6 +539,31 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.InventoryStockMovement", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationBranchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Inventory.Supplier", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.InventoryStockReceipt", b =>
                 {
                     b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
@@ -409,6 +582,36 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .WithMany()
                         .HasForeignKey("SupplierId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Inventory.Supplier", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrderLine", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.Product", b =>
@@ -455,6 +658,11 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .HasForeignKey("SaleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.Sale", b =>

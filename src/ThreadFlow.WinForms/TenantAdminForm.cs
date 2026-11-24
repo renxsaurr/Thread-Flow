@@ -1840,6 +1840,7 @@ public sealed class TenantAdminForm : Form
         private bool _hover;
 
         // White by default (for the blue header bars); light headers can set a dark colour.
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color GlyphColor { get; set; } = Color.White;
 
         public CaptionButton(CaptionGlyph glyph)

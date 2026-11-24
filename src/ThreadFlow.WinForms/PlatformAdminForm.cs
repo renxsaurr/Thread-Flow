@@ -33,9 +33,16 @@ public sealed class PlatformAdminForm : Form
     private static readonly Color TableRowHighlightColor = Color.FromArgb(224, 224, 224);
     private static readonly Color TableLineColor = Color.FromArgb(228, 231, 236);
     private static readonly Color TableHeaderLineColor = Color.FromArgb(208, 213, 221);
+    private static readonly Color AvatarFillColor = Color.FromArgb(30, 64, 175);
+    private static readonly Color ProfileRolePillColor = Color.FromArgb(107, 114, 128);
     private const int TopBarHeight = 56;
     private const int NavItemHeight = 40;
     private const int NavInset = 16;
+    private const int AvatarSize = 40;
+    private const int AvatarGap = 8;
+
+    // The role shown in the header pill and in the account card. This screen is the Platform Admin workspace.
+    private const string AccountRoleLabel = "PLATFORM ADMIN";
 
     private static readonly Font TitleFont = new("Segoe UI", 18F, FontStyle.Bold);
     private static readonly Font SubtitleFont = new("Segoe UI", 9.5F);
@@ -49,6 +56,10 @@ public sealed class PlatformAdminForm : Form
     private static readonly Font PillFont = new("Segoe UI Semibold", 7.5F);
     private static readonly Font BrandSubtitleFont = new("Segoe UI", 9F);
     private static readonly Font NavFont = new("Segoe UI Semibold", 9.5F);
+    private static readonly Font AvatarFont = new("Segoe UI Semibold", 11F);
+    private static readonly Font ProfileInitialFont = new("Segoe UI Semibold", 24F);
+    private static readonly Font ProfileRoleFont = new("Segoe UI Semibold", 8F);
+    private static readonly Font ProfileEmailFont = new("Segoe UI", 11F);
 
     private readonly OnboardingApiClient _api = new();
     private readonly DataGridView _grid = new();
@@ -68,6 +79,7 @@ public sealed class PlatformAdminForm : Form
     private readonly CaptionButton _captionMinimize = new(CaptionGlyph.Minimize);
     private readonly CaptionButton _captionMaximize = new(CaptionGlyph.Maximize);
     private readonly CaptionButton _captionClose = new(CaptionGlyph.Close);
+    private readonly AvatarButton _avatar = new();
     private readonly Label _title = new();
     private readonly Label _subtitle = new();
     private readonly Label _applicationHint = new();
@@ -85,6 +97,12 @@ public sealed class PlatformAdminForm : Form
     private bool _auditLoading;
     private bool _auditViewActive;
 
+    // The account card that drops down from the avatar in the header.
+    private string _accountEmail = string.Empty;
+    private ProfilePopup? _profilePopup;
+    private long _profileClosedTick;
+    private bool _ignoreAvatarClick;
+
     private enum NavIcon
     {
         Applications,
@@ -99,6 +117,8 @@ public sealed class PlatformAdminForm : Form
         Theme.ThreadFlowTheme.Apply(this);
 
         SuspendLayout();
+
+        _accountEmail = ApiSession.Current?.User?.Email ?? string.Empty;
 
         BuildForm();
 
@@ -280,13 +300,16 @@ public sealed class PlatformAdminForm : Form
             }
         };
 
-        // Keep the search box centred in the bar, clear of the brand and the window buttons.
+        const int captionWidth = 46;
+
+        // Keep the search box centred in the bar, clear of the brand, the avatar and the window buttons.
         void CenterSearch()
         {
             var scale = DeviceDpi / 96f;
             var margin = (int)Math.Round(16 * scale);
             var minLeft = pill.Right + margin;
-            var maxLeft = _topBar.Width - (int)Math.Round(46 * 3 * scale) - margin - _search.Width;
+            var maxLeft = _topBar.Width - (int)Math.Round((captionWidth * 3 + AvatarGap + AvatarSize) * scale)
+                - margin - _search.Width;
             var left = Math.Clamp((_topBar.Width - _search.Width) / 2, minLeft, Math.Max(minLeft, maxLeft));
             _search.Location = new Point(left, (_topBar.Height - _search.Height) / 2);
         }
@@ -294,7 +317,29 @@ public sealed class PlatformAdminForm : Form
         _topBar.Resize += (_, _) => CenterSearch();
         CenterSearch();
 
-        const int captionWidth = 46;
+        // Round avatar with the first letter of the signed-in email, just left of the window buttons.
+        _avatar.Text = GetInitial(_accountEmail);
+        _avatar.Size = new Size(AvatarSize, AvatarSize);
+        _avatar.Location = new Point(
+            FormWidth - captionWidth * 3 - AvatarGap - AvatarSize,
+            (TopBarHeight - AvatarSize) / 2);
+        _avatar.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
+        // Pressing the avatar while the card is open takes focus away from the card first (which
+        // closes it), so remember that here and let the click that follows just close it, not reopen it.
+        _avatar.MouseDown += (_, _) =>
+            _ignoreAvatarClick = _profilePopup is null && Environment.TickCount64 - _profileClosedTick < 200;
+        _avatar.Click += (_, _) =>
+        {
+            if (_ignoreAvatarClick)
+            {
+                _ignoreAvatarClick = false;
+                return;
+            }
+
+            ShowProfileCard();
+        };
+
         var captionButtons = new[] { _captionMinimize, _captionMaximize, _captionClose };
         for (var i = 0; i < captionButtons.Length; i++)
         {
@@ -315,10 +360,43 @@ public sealed class PlatformAdminForm : Form
             draggable.DoubleClick += (_, _) => ToggleMaximize();
         }
 
-        _topBar.Controls.AddRange([logo, brand, pill, _search, .. captionButtons]);
+        _topBar.Controls.AddRange([logo, brand, pill, _search, _avatar, .. captionButtons]);
         _topBar.Dock = DockStyle.Top;
         _topBar.ResumeLayout(false);
         Controls.Add(_topBar);
+    }
+
+    private static string GetInitial(string email)
+    {
+        var trimmed = email.Trim();
+        return trimmed.Length == 0 ? "?" : char.ToUpperInvariant(trimmed[0]).ToString();
+    }
+
+    // Opens the account card under the avatar, lined up with the avatar's right edge.
+    private void ShowProfileCard()
+    {
+        if (_profilePopup is not null)
+            return;
+
+        var scale = DeviceDpi / 96f;
+        var popup = new ProfilePopup(GetInitial(_accountEmail), _accountEmail, AccountRoleLabel, scale);
+
+        var anchor = _avatar.RectangleToScreen(_avatar.ClientRectangle);
+        var area = Screen.FromControl(_avatar).WorkingArea;
+        var left = Math.Clamp(anchor.Right - popup.Width, area.Left, Math.Max(area.Left, area.Right - popup.Width));
+        var top = anchor.Bottom + (int)Math.Round(4 * scale);
+        popup.Location = new Point(left, top);
+
+        popup.FormClosed += (_, _) =>
+        {
+            _profilePopup = null;
+            _profileClosedTick = Environment.TickCount64;
+            _avatar.Open = false;
+        };
+
+        _profilePopup = popup;
+        _avatar.Open = true;
+        popup.Show(this);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -958,6 +1036,7 @@ public sealed class PlatformAdminForm : Form
 
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwcpDoNotRound = 1;
+    private const int DwmwcpRound = 2;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -1679,6 +1758,7 @@ public sealed class PlatformAdminForm : Form
         private bool _hover;
 
         // White by default (for the blue header bars); light headers can set a dark colour.
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color GlyphColor { get; set; } = Color.White;
 
         public CaptionButton(CaptionGlyph glyph)
@@ -1781,6 +1861,296 @@ public sealed class PlatformAdminForm : Form
                     g.DrawLine(pen, cx - half, cy + half, cx + half, cy - half);
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Round account button for the blue header bar: a dark circle with the first letter of the
+    /// signed-in email. A soft light ring shows while the mouse is over it or its card is open.
+    /// </summary>
+    private sealed class AvatarButton : Control
+    {
+        private bool _hover;
+        private bool _open;
+
+        public AvatarButton()
+        {
+            TabStop = false;
+            Cursor = Cursors.Hand;
+            AccessibleRole = AccessibleRole.PushButton;
+            AccessibleName = "Account";
+
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.StandardClick,
+                true);
+        }
+
+        [DefaultValue(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool Open
+        {
+            get => _open;
+            set
+            {
+                if (_open == value)
+                    return;
+
+                _open = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Parent?.BackColor ?? BackColor);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            var scale = DeviceDpi / 96f;
+            var diameter = Math.Min(Width, Height) - 1;
+            var outer = new Rectangle((Width - diameter) / 2, (Height - diameter) / 2, diameter, diameter);
+
+            if (_open || _hover)
+            {
+                using var halo = new SolidBrush(Color.FromArgb(_open ? 70 : 40, Color.White));
+                g.FillEllipse(halo, outer);
+            }
+
+            var inset = (int)Math.Round(4 * scale);
+            var inner = Rectangle.Inflate(outer, -inset, -inset);
+            using (var fill = new SolidBrush(AvatarFillColor))
+            {
+                g.FillEllipse(fill, inner);
+            }
+
+            TextRenderer.DrawText(
+                g,
+                Text,
+                AvatarFont,
+                inner,
+                Color.White,
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine |
+                TextFormatFlags.NoPrefix);
+        }
+    }
+
+    /// <summary>
+    /// The account card that drops down from the header avatar: a colourful banner, a big avatar
+    /// with the first letter of the email, the role in an oval and the email underneath.
+    /// It closes when the person clicks anywhere else or presses Esc.
+    /// </summary>
+    private sealed class ProfilePopup : Form
+    {
+        private const int CsDropShadow = 0x00020000;
+
+        private readonly string _initial;
+        private readonly string _email;
+        private readonly string _role;
+        private readonly float _scale;
+
+        public ProfilePopup(string initial, string email, string role, float scale)
+        {
+            _initial = initial;
+            _email = email;
+            _role = role;
+            _scale = scale;
+
+            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+            BackColor = Palette.BackgroundSecondary.Color;
+            DoubleBuffered = true;
+
+            // Wide enough for the whole email, within sensible limits.
+            var emailWidth = TextRenderer.MeasureText(email, ProfileEmailFont).Width;
+            var width = Math.Clamp(emailWidth + Px(72), Px(280), Px(460));
+            ClientSize = new Size(width, Px(196));
+        }
+
+        private int Px(float designUnits) => (int)Math.Round(designUnits * _scale);
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                // Soft drop shadow around the card.
+                var parameters = base.CreateParams;
+                parameters.ClassStyle |= CsDropShadow;
+                return parameters;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+
+            // Rounded corners on Windows 11 (build 22000+); older versions keep square corners.
+            if (Environment.OSVersion.Version.Build >= 22000)
+            {
+                var preference = DwmwcpRound;
+                _ = DwmSetWindowAttribute(Handle, DwmwaWindowCornerPreference, ref preference, sizeof(int));
+            }
+        }
+
+        // Clicking anywhere outside the card (or switching to another window) closes it.
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            Close();
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                Close();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Palette.BackgroundSecondary.Color);
+
+            const TextFormatFlags centered =
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine |
+                TextFormatFlags.NoPrefix;
+
+            var bannerHeight = Px(68);
+            PaintBanner(g, new Rectangle(0, 0, ClientSize.Width, bannerHeight));
+
+            // Big avatar, centred on the lower edge of the banner.
+            var avatarSize = Px(72);
+            var avatar = new Rectangle(
+                (ClientSize.Width - avatarSize) / 2,
+                bannerHeight - avatarSize / 2,
+                avatarSize,
+                avatarSize);
+            using (var fill = new SolidBrush(Palette.Primary.Color))
+            {
+                g.FillEllipse(fill, avatar);
+            }
+
+            TextRenderer.DrawText(g, _initial, ProfileInitialFont, avatar, Color.White, centered);
+
+            // Role in an oval.
+            var roleTextWidth = TextRenderer.MeasureText(
+                _role,
+                ProfileRoleFont,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width;
+            var pillWidth = roleTextWidth + Px(20);
+            var pillHeight = Px(22);
+            var pill = new Rectangle(
+                (ClientSize.Width - pillWidth) / 2,
+                avatar.Bottom + Px(14),
+                pillWidth,
+                pillHeight);
+            using (var path = RoundedRectangle(pill, pill.Height / 2))
+            using (var fill = new SolidBrush(ProfileRolePillColor))
+            {
+                g.FillPath(fill, path);
+            }
+
+            TextRenderer.DrawText(g, _role, ProfileRoleFont, pill, Color.White, centered);
+
+            // Email.
+            var emailBounds = new Rectangle(Px(16), pill.Bottom + Px(10), ClientSize.Width - Px(32), Px(26));
+            TextRenderer.DrawText(
+                g,
+                _email,
+                ProfileEmailFont,
+                emailBounds,
+                Palette.TextPrimary.Color,
+                centered | TextFormatFlags.EndEllipsis);
+        }
+
+        // Orange, yellow, sky blue and purple washes with a pale swoosh across them.
+        private static void PaintBanner(Graphics g, Rectangle bounds)
+        {
+            var state = g.Save();
+            g.SetClip(bounds);
+
+            using (var sky = new LinearGradientBrush(bounds, Color.White, Color.White, 10f))
+            {
+                sky.InterpolationColors = new ColorBlend
+                {
+                    Positions = [0f, 0.28f, 0.5f, 0.75f, 1f],
+                    Colors =
+                    [
+                        Color.FromArgb(235, 125, 25),
+                        Color.FromArgb(252, 215, 120),
+                        Color.FromArgb(52, 170, 235),
+                        Color.FromArgb(96, 72, 232),
+                        Color.FromArgb(126, 34, 200)
+                    ]
+                };
+                g.FillRectangle(sky, bounds);
+            }
+
+            using (var cyan = new SolidBrush(Color.FromArgb(190, 20, 170, 232)))
+            {
+                g.FillEllipse(
+                    cyan,
+                    bounds.Left - bounds.Width * 0.12f,
+                    bounds.Top + bounds.Height * 0.45f,
+                    bounds.Width * 0.5f,
+                    bounds.Height * 1.1f);
+            }
+
+            using (var violet = new SolidBrush(Color.FromArgb(150, 150, 40, 210)))
+            {
+                g.FillEllipse(
+                    violet,
+                    bounds.Left + bounds.Width * 0.62f,
+                    bounds.Top - bounds.Height * 0.4f,
+                    bounds.Width * 0.5f,
+                    bounds.Height * 1.2f);
+            }
+
+            using (var swoosh = new GraphicsPath())
+            {
+                swoosh.AddBezier(
+                    bounds.Left, bounds.Bottom - bounds.Height * 0.1f,
+                    bounds.Left + bounds.Width * 0.30f, bounds.Top - bounds.Height * 0.05f,
+                    bounds.Left + bounds.Width * 0.60f, bounds.Bottom + bounds.Height * 0.15f,
+                    bounds.Right, bounds.Top + bounds.Height * 0.30f);
+                swoosh.AddLine(bounds.Right, bounds.Top + bounds.Height * 0.30f, bounds.Right, bounds.Bottom);
+                swoosh.AddLine(bounds.Right, bounds.Bottom, bounds.Left, bounds.Bottom);
+                swoosh.CloseFigure();
+
+                using var wash = new SolidBrush(Color.FromArgb(48, Color.White));
+                g.FillPath(wash, swoosh);
+            }
+
+            g.Restore(state);
         }
     }
 

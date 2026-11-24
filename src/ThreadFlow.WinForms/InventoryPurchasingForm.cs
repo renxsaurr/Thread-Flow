@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Drawing.Printing;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using ThreadFlow.WinForms.ApiClient;
@@ -9,10 +10,10 @@ namespace ThreadFlow.WinForms
 {
 
     /// <summary>
-    /// Inventory/Purchasing Staff workspace for the product catalog, suppliers and stock receipts.
-    /// Same shell as the Platform Admin screen: blue header bar with search, sidebar navigation and
-    /// Docker Desktop-style tables. Creating and editing records happens in focused dialogs instead of
-    /// forms squeezed under the table.
+    /// Inventory/Purchasing Staff workspace for the product catalog, suppliers, stock receipts,
+    /// purchase orders, stock control and stock history. Every section is a page in this one shell:
+    /// blue header bar with search, sidebar navigation and Docker Desktop-style tables. Creating and
+    /// editing records happens in focused dialogs instead of forms squeezed under the table.
     /// </summary>
     public sealed class InventoryPurchasingForm : Form
     {
@@ -57,6 +58,12 @@ namespace ThreadFlow.WinForms
         private static readonly Color ActivePillText = Color.FromArgb(22, 101, 52);
         private static readonly Color InactivePillBack = Color.FromArgb(235, 236, 239);
         private static readonly Color InactivePillText = Color.FromArgb(95, 105, 120);
+        private static readonly Color OrderedPillBack = Color.FromArgb(219, 234, 254);
+        private static readonly Color OrderedPillText = Color.FromArgb(30, 64, 175);
+        private static readonly Color PartialPillBack = Color.FromArgb(254, 243, 199);
+        private static readonly Color PartialPillText = Color.FromArgb(146, 64, 14);
+        private static readonly Color CancelledPillBack = Color.FromArgb(254, 226, 226);
+        private static readonly Color CancelledPillText = Color.FromArgb(153, 27, 27);
 
         private static readonly Font TitleFont = new("Segoe UI", 18F, FontStyle.Bold);
         private static readonly Font SubtitleFont = new("Segoe UI", 9.5F);
@@ -82,6 +89,9 @@ namespace ThreadFlow.WinForms
         private readonly DataGridView _productsGrid = new();
         private readonly DataGridView _suppliersGrid = new();
         private readonly DataGridView _receiptsGrid = new();
+        private readonly DataGridView _ordersGrid = new();
+        private readonly DataGridView _stockGrid = new();
+        private readonly DataGridView _movementsGrid = new();
         private readonly BranchBadge _branchBadge = new();
 
         private readonly RoundedButton _refresh = MakeSecondaryButton("Refresh");
@@ -89,14 +99,28 @@ namespace ThreadFlow.WinForms
         private readonly RoundedButton _editProduct = MakeSecondaryButton("Edit");
         private readonly RoundedButton _receiveFromProducts = MakeSecondaryButton("Receive stock");
         private readonly RoundedButton _toggleProduct = MakeSecondaryButton("Deactivate");
+        private readonly RoundedButton _printSkuLabels = MakeSecondaryButton("Print SKU labels");
         private readonly RoundedButton _newSupplier = MakePrimaryButton("New supplier");
         private readonly RoundedButton _editSupplier = MakeSecondaryButton("Edit");
         private readonly RoundedButton _toggleSupplier = MakeSecondaryButton("Deactivate");
         private readonly RoundedButton _receiveFromReceipts = MakePrimaryButton("Receive stock");
+        private readonly RoundedButton _newOrder = MakePrimaryButton("New draft");
+        private readonly RoundedButton _editOrder = MakeSecondaryButton("Edit draft");
+        private readonly RoundedButton _placeOrder = MakeSecondaryButton("Place order");
+        private readonly RoundedButton _receiveOrder = MakeSecondaryButton("Receive items");
+        private readonly RoundedButton _cancelOrder = MakeSecondaryButton("Cancel order");
+        private readonly RoundedButton _setReorderLevel = MakeSecondaryButton("Set reorder level");
+        private readonly RoundedButton _adjustStock = MakePrimaryButton("Adjust / damaged");
+        private readonly RoundedButton _physicalCount = MakeSecondaryButton("Physical count");
+        private readonly RoundedButton _returnToSupplier = MakeSecondaryButton("Return to supplier");
+        private readonly RoundedButton _transferBranch = MakeSecondaryButton("Transfer branch");
 
         private readonly SidebarNavButton _navProducts = new("Products", NavIcon.Products);
         private readonly SidebarNavButton _navSuppliers = new("Suppliers", NavIcon.Suppliers);
         private readonly SidebarNavButton _navReceipts = new("Stock Receipts", NavIcon.Receipts);
+        private readonly SidebarNavButton _navOrders = new("Purchase Orders", NavIcon.Orders);
+        private readonly SidebarNavButton _navStockControl = new("Stock Control", NavIcon.StockControl);
+        private readonly SidebarNavButton _navStockHistory = new("Stock History", NavIcon.StockHistory);
         private readonly SidebarNavButton _navLogout = new("Log out", NavIcon.LogOut);
 
         private readonly Panel _topBar = new ResizeEdgePanel();
@@ -121,21 +145,47 @@ namespace ThreadFlow.WinForms
         private readonly Panel _productsPage = new();
         private readonly Panel _suppliersPage = new();
         private readonly Panel _receiptsPage = new();
+        private readonly Panel _ordersPage = new();
+        private readonly Panel _stockPage = new();
+        private readonly Panel _movementsPage = new();
         private readonly Label _productsHint = new();
         private readonly Label _suppliersHint = new();
         private readonly Label _receiptsHint = new();
+        private readonly Label _ordersHint = new();
+        private readonly Label _stockHint = new();
+        private readonly Label _movementsHint = new();
+
+        // Filters Stock Control down to items that have reached their reorder level.
+        private readonly CheckBox _lowStockOnly = new()
+        {
+            Text = "Low stock only",
+            AutoSize = true,
+            Font = SubtitleFont,
+            ForeColor = Palette.TextSecondary.Color,
+            BackColor = Palette.BackgroundSecondary.Color,
+            Margin = Padding.Empty,
+            Cursor = Cursors.Hand
+        };
 
         private List<InventoryProductDto> _products = [];
         private List<InventorySupplierDto> _suppliers = [];
         private List<InventoryBranchDto> _branches = [];
         private List<InventoryStockReceiptDto> _receipts = [];
+        private List<InventoryPurchaseOrderDto> _orders = [];
+        private List<InventoryStockMovementDto> _movements = [];
 
         private string _productSearchText = string.Empty;
         private string _supplierSearchText = string.Empty;
         private string _receiptSearchText = string.Empty;
+        private string _orderSearchText = string.Empty;
+        private string _stockSearchText = string.Empty;
+        private string _movementSearchText = string.Empty;
         private string _productsHintText = string.Empty;
         private string _suppliersHintText = string.Empty;
         private string _receiptsHintText = string.Empty;
+        private string _ordersHintText = string.Empty;
+        private string _stockHintText = string.Empty;
+        private string _movementsHintText = string.Empty;
 
         private InventoryPage _activePage = InventoryPage.Products;
         // Staff are assigned to their own branch, so it is shown (not picked) in the page header.
@@ -145,7 +195,10 @@ namespace ThreadFlow.WinForms
         {
             Products,
             Suppliers,
-            Receipts
+            Receipts,
+            Orders,
+            StockControl,
+            StockHistory
         }
 
         private enum NavIcon
@@ -153,6 +206,9 @@ namespace ThreadFlow.WinForms
             Products,
             Suppliers,
             Receipts,
+            Orders,
+            StockControl,
+            StockHistory,
             LogOut
         }
 
@@ -239,13 +295,22 @@ namespace ThreadFlow.WinForms
             StyleGrid(_productsGrid);
             StyleGrid(_suppliersGrid);
             StyleGrid(_receiptsGrid);
+            StyleGrid(_ordersGrid);
+            StyleGrid(_stockGrid);
+            StyleGrid(_movementsGrid);
             ConfigureProductsGrid();
             ConfigureSuppliersGrid();
             ConfigureReceiptsGrid();
+            ConfigureOrdersGrid();
+            ConfigureStockGrid();
+            ConfigureMovementsGrid();
 
             TrackUserSelection(_productsGrid);
             TrackUserSelection(_suppliersGrid);
             TrackUserSelection(_receiptsGrid);
+            TrackUserSelection(_ordersGrid);
+            TrackUserSelection(_stockGrid);
+            TrackUserSelection(_movementsGrid);
 
             _productsGrid.SelectionChanged += (_, _) => UpdateProductActions();
             _productsGrid.CellDoubleClick += (_, e) =>
@@ -264,16 +329,38 @@ namespace ThreadFlow.WinForms
                 if (e.RowIndex >= 0)
                     ShowSelectedReceiptDetails();
             };
+            _ordersGrid.SelectionChanged += (_, _) => UpdateOrderActions();
+            _ordersGrid.CellDoubleClick += async (_, e) =>
+            {
+                if (e.RowIndex >= 0)
+                    await ShowOrderDialogAsync(CurrentOrder());
+            };
+            _stockGrid.SelectionChanged += (_, _) => UpdateStockActions();
+            _stockGrid.CellDoubleClick += (_, e) =>
+            {
+                if (e.RowIndex >= 0)
+                    ShowSelectedStockDetails();
+            };
+            _movementsGrid.CellDoubleClick += (_, e) =>
+            {
+                if (e.RowIndex >= 0)
+                    ShowSelectedMovementDetails();
+            };
 
             BuildProductsPage();
             BuildSuppliersPage();
             BuildReceiptsPage();
+            BuildOrdersPage();
+            BuildStockControlPage();
+            BuildStockHistoryPage();
 
             _pageHost.Location = new Point(ContentLeft, HeaderHeight);
             _pageHost.Size = new Size(contentWidth, FormHeight - HeaderHeight);
             _pageHost.BackColor = Palette.BackgroundSecondary.Color;
             _pageHost.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            _pageHost.Controls.AddRange([_productsPage, _suppliersPage, _receiptsPage]);
+            _pageHost.Controls.AddRange([
+                _productsPage, _suppliersPage, _receiptsPage, _ordersPage, _stockPage, _movementsPage
+            ]);
 
             _content.Controls.AddRange([
                 _sidebar, _sidebarEdge, _title, _subtitle, _refresh, _branchBadge,
@@ -289,6 +376,8 @@ namespace ThreadFlow.WinForms
             ShowPage(InventoryPage.Products);
             UpdateProductActions();
             UpdateSupplierActions();
+            UpdateOrderActions();
+            UpdateStockActions();
             UpdateReceiveActions();
         }
 
@@ -299,16 +388,18 @@ namespace ThreadFlow.WinForms
             var card = MakeGridCard(_productsGrid);
             var footer = MakeFooter(
                 _productsHint,
-                _newProduct, _receiveFromProducts, _editProduct, _toggleProduct);
+                _newProduct, _receiveFromProducts, _editProduct, _toggleProduct, _printSkuLabels);
 
             _newProduct.Size = new Size(130, ButtonHeight);
             _receiveFromProducts.Size = new Size(130, ButtonHeight);
             _editProduct.Size = new Size(80, ButtonHeight);
             _toggleProduct.Size = new Size(116, ButtonHeight);
+            _printSkuLabels.Size = new Size(142, ButtonHeight);
 
             _newProduct.Click += (_, _) => ShowProductDialog(null);
             _editProduct.Click += (_, _) => ShowProductDialog(CurrentProduct());
             _toggleProduct.Click += async (_, _) => await ToggleProductAsync();
+            _printSkuLabels.Click += (_, _) => PrintCurrentProductLabels();
             _receiveFromProducts.Click += (_, _) => ShowReceiveDialog(CurrentProduct());
 
             AddPage(_productsPage, card, footer);
@@ -341,6 +432,60 @@ namespace ThreadFlow.WinForms
             AddPage(_receiptsPage, card, footer);
         }
 
+        private void BuildOrdersPage()
+        {
+            var card = MakeGridCard(_ordersGrid);
+            var footer = MakeFooter(
+                _ordersHint,
+                _newOrder, _receiveOrder, _placeOrder, _editOrder, _cancelOrder);
+
+            _newOrder.Size = new Size(120, ButtonHeight);
+            _receiveOrder.Size = new Size(130, ButtonHeight);
+            _placeOrder.Size = new Size(112, ButtonHeight);
+            _editOrder.Size = new Size(100, ButtonHeight);
+            _cancelOrder.Size = new Size(124, ButtonHeight);
+
+            _newOrder.Click += async (_, _) => await ShowOrderDialogAsync(null);
+            _editOrder.Click += async (_, _) => await ShowOrderDialogAsync(CurrentOrder());
+            _placeOrder.Click += async (_, _) => await PlaceOrderAsync();
+            _receiveOrder.Click += async (_, _) => await ReceiveOrderAsync();
+            _cancelOrder.Click += async (_, _) => await CancelOrderAsync();
+
+            AddPage(_ordersPage, card, footer);
+        }
+
+        private void BuildStockControlPage()
+        {
+            var card = MakeGridCard(_stockGrid);
+            var footer = MakeFilterFooter(
+                _stockHint, _lowStockOnly,
+                _setReorderLevel, _adjustStock, _physicalCount, _returnToSupplier, _transferBranch);
+
+            _setReorderLevel.Size = new Size(140, ButtonHeight);
+            _adjustStock.Size = new Size(136, ButtonHeight);
+            _physicalCount.Size = new Size(124, ButtonHeight);
+            _returnToSupplier.Size = new Size(140, ButtonHeight);
+            _transferBranch.Size = new Size(128, ButtonHeight);
+
+            _lowStockOnly.CheckedChanged += (_, _) => BindStock();
+
+            _setReorderLevel.Click += async (_, _) => await SetReorderLevelAsync();
+            _adjustStock.Click += async (_, _) => await AdjustStockAsync();
+            _physicalCount.Click += async (_, _) => await RecordStockCountAsync();
+            _returnToSupplier.Click += async (_, _) => await ReturnToSupplierAsync();
+            _transferBranch.Click += async (_, _) => await TransferBranchAsync();
+
+            AddPage(_stockPage, card, footer);
+        }
+
+        private void BuildStockHistoryPage()
+        {
+            var card = MakeGridCard(_movementsGrid);
+            var footer = MakeFooter(_movementsHint);
+
+            AddPage(_movementsPage, card, footer);
+        }
+
         private static Panel MakeGridCard(DataGridView grid)
         {
             grid.Dock = DockStyle.Fill;
@@ -358,7 +503,17 @@ namespace ThreadFlow.WinForms
         /// The strip under every table: a short message on the left and that page's actions on the
         /// right (the first button passed in ends up right-most, like Approve in Platform Admin).
         /// </summary>
-        private static Panel MakeFooter(Label hint, params RoundedButton[] buttons)
+        private static Panel MakeFooter(Label hint, params RoundedButton[] buttons) =>
+            BuildFooter(hint, null, buttons);
+
+        /// <summary>
+        /// The same strip as MakeFooter, with a small filter control (for example "Low stock only")
+        /// pinned to the right of the hint text.
+        /// </summary>
+        private static Panel MakeFilterFooter(Label hint, Control filter, params RoundedButton[] buttons) =>
+            BuildFooter(hint, filter, buttons);
+
+        private static Panel BuildFooter(Label hint, Control? filter, RoundedButton[] buttons)
         {
             var footer = new Panel
             {
@@ -405,7 +560,33 @@ namespace ThreadFlow.WinForms
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            table.Controls.Add(hint, 0, 0);
+            if (filter is null)
+            {
+                table.Controls.Add(hint, 0, 0);
+            }
+            else
+            {
+                // The hint keeps the remaining room; the filter keeps its natural width.
+                var hintRow = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 2,
+                    RowCount = 1,
+                    BackColor = Palette.BackgroundSecondary.Color,
+                    Margin = Padding.Empty,
+                    Padding = Padding.Empty
+                };
+                hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                hintRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+                filter.Anchor = AnchorStyles.Left;
+                filter.Margin = new Padding(0, 0, 4, 0);
+
+                hintRow.Controls.Add(hint, 0, 0);
+                hintRow.Controls.Add(filter, 1, 0);
+                table.Controls.Add(hintRow, 0, 0);
+            }
             table.Controls.Add(buttonRow, 1, 0);
 
             var divider = new Panel
@@ -439,11 +620,18 @@ namespace ThreadFlow.WinForms
             _navProducts.Active = page == InventoryPage.Products;
             _navSuppliers.Active = page == InventoryPage.Suppliers;
             _navReceipts.Active = page == InventoryPage.Receipts;
+            _navOrders.Active = page == InventoryPage.Orders;
+            _navStockControl.Active = page == InventoryPage.StockControl;
+            _navStockHistory.Active = page == InventoryPage.StockHistory;
 
             _productsPage.Visible = page == InventoryPage.Products;
             _suppliersPage.Visible = page == InventoryPage.Suppliers;
             _receiptsPage.Visible = page == InventoryPage.Receipts;
+            _ordersPage.Visible = page == InventoryPage.Orders;
+            _stockPage.Visible = page == InventoryPage.StockControl;
+            _movementsPage.Visible = page == InventoryPage.StockHistory;
 
+            // Everything except the supplier directory is tied to the staff member's branch.
             var branchPage = page != InventoryPage.Suppliers;
             _branchBadge.Visible = branchPage;
 
@@ -458,6 +646,21 @@ namespace ThreadFlow.WinForms
                     _title.Text = "Suppliers";
                     _subtitle.Text = "Vendors you purchase stock from.";
                     _suppliersGrid.Focus();
+                    break;
+                case InventoryPage.Orders:
+                    _title.Text = "Purchase orders";
+                    _subtitle.Text = "Drafts and deliveries ordered from suppliers.";
+                    _ordersGrid.Focus();
+                    break;
+                case InventoryPage.StockControl:
+                    _title.Text = "Stock control";
+                    _subtitle.Text = "On-hand quantities, reorder alerts and adjustments.";
+                    _stockGrid.Focus();
+                    break;
+                case InventoryPage.StockHistory:
+                    _title.Text = "Stock history";
+                    _subtitle.Text = "Every stock movement recorded at a branch.";
+                    _movementsGrid.Focus();
                     break;
                 default:
                     _title.Text = "Stock receipts";
@@ -480,6 +683,18 @@ namespace ThreadFlow.WinForms
                 case InventoryPage.Suppliers:
                     _search.PlaceholderText = "Search suppliers";
                     _search.SetSearchText(_supplierSearchText);
+                    break;
+                case InventoryPage.Orders:
+                    _search.PlaceholderText = "Search purchase orders";
+                    _search.SetSearchText(_orderSearchText);
+                    break;
+                case InventoryPage.StockControl:
+                    _search.PlaceholderText = "Search stock";
+                    _search.SetSearchText(_stockSearchText);
+                    break;
+                case InventoryPage.StockHistory:
+                    _search.PlaceholderText = "Search stock history";
+                    _search.SetSearchText(_movementSearchText);
                     break;
                 default:
                     _search.PlaceholderText = "Search stock receipts";
@@ -531,6 +746,18 @@ namespace ThreadFlow.WinForms
                     case InventoryPage.Suppliers:
                         _supplierSearchText = _search.SearchText;
                         BindSuppliers();
+                        break;
+                    case InventoryPage.Orders:
+                        _orderSearchText = _search.SearchText;
+                        BindOrders();
+                        break;
+                    case InventoryPage.StockControl:
+                        _stockSearchText = _search.SearchText;
+                        BindStock();
+                        break;
+                    case InventoryPage.StockHistory:
+                        _movementSearchText = _search.SearchText;
+                        BindMovements();
                         break;
                     default:
                         _receiptSearchText = _search.SearchText;
@@ -611,7 +838,10 @@ namespace ThreadFlow.WinForms
             _sidebar.BackColor = SidebarBackColor;
             _sidebar.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
 
-            var navItems = new[] { _navProducts, _navSuppliers, _navReceipts };
+            var navItems = new[]
+            {
+                _navProducts, _navSuppliers, _navReceipts, _navOrders, _navStockControl, _navStockHistory
+            };
             for (var i = 0; i < navItems.Length; i++)
             {
                 var item = navItems[i];
@@ -623,6 +853,9 @@ namespace ThreadFlow.WinForms
             _navProducts.Click += (_, _) => ShowPage(InventoryPage.Products);
             _navSuppliers.Click += (_, _) => ShowPage(InventoryPage.Suppliers);
             _navReceipts.Click += (_, _) => ShowPage(InventoryPage.Receipts);
+            _navOrders.Click += (_, _) => ShowPage(InventoryPage.Orders);
+            _navStockControl.Click += (_, _) => ShowPage(InventoryPage.StockControl);
+            _navStockHistory.Click += (_, _) => ShowPage(InventoryPage.StockHistory);
 
             var navDivider = new Panel
             {
@@ -637,7 +870,10 @@ namespace ThreadFlow.WinForms
             _navLogout.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             _navLogout.Click += (_, _) => LogOut();
 
-            _sidebar.Controls.AddRange([_navProducts, _navSuppliers, _navReceipts, navDivider, _navLogout]);
+            _sidebar.Controls.AddRange([
+                _navProducts, _navSuppliers, _navReceipts, _navOrders, _navStockControl, _navStockHistory,
+                navDivider, _navLogout
+            ]);
 
             _sidebarEdge.Location = new Point(SidebarWidth, 0);
             _sidebarEdge.Size = new Size(1, FormHeight);
@@ -1062,6 +1298,52 @@ namespace ThreadFlow.WinForms
             AddGridColumn(_receiptsGrid, nameof(ReceiptRow.Reference), "Reference", fill, 120, 100, wrap: true);
         }
 
+        private void ConfigureOrdersGrid()
+        {
+            const DataGridViewAutoSizeColumnMode fit = DataGridViewAutoSizeColumnMode.AllCells;
+            const DataGridViewAutoSizeColumnMode fill = DataGridViewAutoSizeColumnMode.Fill;
+
+            AddGridColumn(_ordersGrid, nameof(OrderRow.Number), "Order", fit, 110, 90);
+            AddGridColumn(_ordersGrid, nameof(OrderRow.Supplier), "Supplier", fill, 140, 110, wrap: true);
+            AddGridColumn(_ordersGrid, StatusColumn, "Status", fit, 110, 100);
+            AddGridColumn(_ordersGrid, nameof(OrderRow.Created), "Created", fill, 90, 95, wrap: true, format: "g");
+            AddGridColumn(_ordersGrid, nameof(OrderRow.Expected), "Expected", fill, 90, 95, wrap: true, format: "g");
+            AddGridColumn(_ordersGrid, nameof(OrderRow.UnitsOrdered), "Units ordered", fit, 100, 100, format: "N0", alignRight: true);
+            AddGridColumn(_ordersGrid, nameof(OrderRow.UnitsReceived), "Units received", fit, 100, 105, format: "N0", alignRight: true);
+        }
+
+        private void ConfigureStockGrid()
+        {
+            const DataGridViewAutoSizeColumnMode fit = DataGridViewAutoSizeColumnMode.AllCells;
+            const DataGridViewAutoSizeColumnMode fill = DataGridViewAutoSizeColumnMode.Fill;
+
+            AddGridColumn(_stockGrid, nameof(StockRow.Sku), "SKU", fit, 100, 80);
+            AddGridColumn(_stockGrid, nameof(StockRow.Product), "Product", fill, 160, 120, wrap: true);
+            AddGridColumn(_stockGrid, nameof(StockRow.Color), "Color", fit, 100, 70);
+            AddGridColumn(_stockGrid, nameof(StockRow.Size), "Size", fit, 100, 60);
+            AddGridColumn(_stockGrid, nameof(StockRow.OnHand), "On hand", fit, 100, 80, format: "N0", alignRight: true);
+            AddGridColumn(_stockGrid, nameof(StockRow.ReorderLevel), "Reorder at", fit, 100, 90, format: "N0", alignRight: true);
+            AddGridColumn(_stockGrid, nameof(StockRow.Supplier), "Supplier", fill, 120, 100, wrap: true);
+            AddGridColumn(_stockGrid, StatusColumn, "Status", fit, 100, 90);
+        }
+
+        private void ConfigureMovementsGrid()
+        {
+            const DataGridViewAutoSizeColumnMode fit = DataGridViewAutoSizeColumnMode.AllCells;
+            const DataGridViewAutoSizeColumnMode fill = DataGridViewAutoSizeColumnMode.Fill;
+
+            AddGridColumn(_movementsGrid, nameof(MovementRow.When), "When", fill, 90, 95, wrap: true, format: "g");
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Type), "Type", fit, 110, 95, wrap: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Sku), "SKU", fit, 100, 80);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Product), "Product", fill, 150, 120, wrap: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Branch), "Branch", fill, 100, 90, wrap: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Destination), "To branch", fill, 100, 90, wrap: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Quantity), "Quantity", fit, 100, 80, format: "N0", alignRight: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Change), "Change", fit, 100, 80, format: "+0;-0;0", alignRight: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Reference), "Reference", fill, 120, 100, wrap: true);
+            AddGridColumn(_movementsGrid, nameof(MovementRow.Notes), "Notes", fill, 160, 120, wrap: true);
+        }
+
         private static void AddGridColumn(
             DataGridView grid,
             string property,
@@ -1109,7 +1391,7 @@ namespace ThreadFlow.WinForms
                 return;
 
             var scale = DeviceDpi / 96f;
-            var active = text == "Active";
+            var (pillBack, pillText) = StatusPillColors(text);
             var textSize = TextRenderer.MeasureText(
                 g, text, GridHeaderFont, new Size(int.MaxValue, int.MaxValue),
                 TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
@@ -1124,7 +1406,7 @@ namespace ThreadFlow.WinForms
             var state = g.Save();
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = RoundedRectangle(bounds, bounds.Height / 2))
-            using (var fill = new SolidBrush(active ? ActivePillBack : InactivePillBack))
+            using (var fill = new SolidBrush(pillBack))
             {
                 g.FillPath(fill, path);
             }
@@ -1135,13 +1417,26 @@ namespace ThreadFlow.WinForms
                 text,
                 GridHeaderFont,
                 bounds,
-                active ? ActivePillText : InactivePillText,
+                pillText,
                 TextFormatFlags.HorizontalCenter |
                 TextFormatFlags.VerticalCenter |
                 TextFormatFlags.SingleLine |
                 TextFormatFlags.NoPrefix |
                 TextFormatFlags.NoPadding);
         }
+
+        /// <summary>
+        /// Pill colours for the Status column: catalog rows show Active/Inactive, purchase orders
+        /// show their lifecycle state, so each state gets its own tint.
+        /// </summary>
+        private static (Color Back, Color Text) StatusPillColors(string status) => status switch
+        {
+            "Active" or "Received" => (ActivePillBack, ActivePillText),
+            "Ordered" => (OrderedPillBack, OrderedPillText),
+            "PartiallyReceived" or "Partially received" => (PartialPillBack, PartialPillText),
+            "Cancelled" or "Canceled" => (CancelledPillBack, CancelledPillText),
+            _ => (InactivePillBack, InactivePillText)
+        };
 
         private static void SelectRow<T>(DataGridView grid, Func<T, bool> match) where T : class
         {
@@ -1170,6 +1465,8 @@ namespace ThreadFlow.WinForms
             await RefreshSuppliersAsync(selectSupplierId);
             await RefreshProductsAsync();
             await RefreshReceiptsAsync();
+            await RefreshOrdersAsync();
+            await RefreshMovementsAsync();
         }
 
         private async Task RefreshActiveViewAsync()
@@ -1184,6 +1481,15 @@ namespace ThreadFlow.WinForms
                         break;
                     case InventoryPage.Suppliers:
                         await RefreshSuppliersAsync();
+                        break;
+                    case InventoryPage.Orders:
+                        await RefreshOrdersAsync();
+                        break;
+                    case InventoryPage.StockControl:
+                        await RefreshProductsAsync();
+                        break;
+                    case InventoryPage.StockHistory:
+                        await RefreshMovementsAsync();
                         break;
                     default:
                         await RefreshReceiptsAsync();
@@ -1269,6 +1575,46 @@ namespace ThreadFlow.WinForms
             }
         }
 
+        private async Task RefreshOrdersAsync()
+        {
+            try
+            {
+                if (_selectedBranch is not { } branch)
+                {
+                    _orders = [];
+                    BindOrders();
+                    return;
+                }
+
+                _orders = await _api.GetPurchaseOrdersAsync(branch.Id);
+                BindOrders();
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not load purchase orders", InventoryPage.Orders);
+            }
+        }
+
+        private async Task RefreshMovementsAsync()
+        {
+            try
+            {
+                if (_selectedBranch is not { } branch)
+                {
+                    _movements = [];
+                    BindMovements();
+                    return;
+                }
+
+                _movements = await _api.GetMovementsAsync(branch.Id);
+                BindMovements();
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not load stock history", InventoryPage.StockHistory);
+            }
+        }
+
         // ---- Data: binding to the tables ----
 
         private void RefreshHints()
@@ -1276,6 +1622,9 @@ namespace ThreadFlow.WinForms
             _productsHint.Text = _productsHintText;
             _suppliersHint.Text = _suppliersHintText;
             _receiptsHint.Text = _receiptsHintText;
+            _ordersHint.Text = _ordersHintText;
+            _stockHint.Text = _stockHintText;
+            _movementsHint.Text = _movementsHintText;
         }
 
         private void BindProducts(Guid? selectId = null)
@@ -1319,6 +1668,9 @@ namespace ThreadFlow.WinForms
                         : $"{rows.Count} product(s). Double-click a row to edit.";
             RefreshHints();
             UpdateProductActions();
+
+            // Stock Control shows the same products, so it follows every catalog reload.
+            BindStock();
         }
 
         private void BindSuppliers(Guid? selectId = null)
@@ -1396,6 +1748,140 @@ namespace ThreadFlow.WinForms
             RefreshHints();
         }
 
+        private void BindOrders()
+        {
+            var query = _orderSearchText.Trim();
+            var searching = query.Length > 0;
+
+            var rows = _orders
+                .Where(order => !searching || MatchesSearch(
+                    query,
+                    order.Number,
+                    order.SupplierName,
+                    order.Status,
+                    order.CreatedAtUtc.ToLocalTime(),
+                    order.ExpectedAtUtc?.ToLocalTime(),
+                    order.Lines.Sum(line => line.QuantityOrdered),
+                    order.Lines.Sum(line => line.QuantityReceived)))
+                .Select(ToOrderRow)
+                .ToList();
+
+            var keep = _userSelectedGrids.Contains(_ordersGrid) ? CurrentOrder()?.Id : null;
+
+            _ordersGrid.DataSource = null;
+            _ordersGrid.DataSource = rows;
+            SizeColumnsToContent(_ordersGrid);
+            if (keep is Guid id)
+                SelectRow<OrderRow>(_ordersGrid, row => row.Source.Id == id);
+            else
+                ClearGridSelection(_ordersGrid);
+
+            _ordersHintText = _selectedBranch is null
+                ? "No available branch was found for this account."
+                : searching
+                    ? rows.Count == 0
+                        ? $"No purchase orders match \"{query}\"."
+                        : $"Showing {rows.Count} matching purchase order(s). Double-click a draft to edit it."
+                    : rows.Count == 0
+                        ? "No purchase orders yet. Choose New draft to create one."
+                        : $"{rows.Count} purchase order(s). Double-click a draft to edit it.";
+            RefreshHints();
+            UpdateOrderActions();
+        }
+
+        private void BindStock()
+        {
+            var query = _stockSearchText.Trim();
+            var searching = query.Length > 0;
+            var branchName = _selectedBranch?.Name;
+
+            var lowStock = _products
+                .Where(product => product.ReorderLevel > 0 && product.QuantityOnHand <= product.ReorderLevel)
+                .ToList();
+            var source = _lowStockOnly.Checked ? lowStock : _products;
+
+            var rows = source
+                .Where(product => !searching || MatchesSearch(
+                    query,
+                    product.Sku,
+                    product.Name,
+                    product.Color,
+                    product.Size,
+                    product.QuantityOnHand,
+                    product.ReorderLevel,
+                    product.SupplierName,
+                    product.IsActive ? "Active" : "Inactive"))
+                .Select(ToStockRow)
+                .ToList();
+
+            var keep = _userSelectedGrids.Contains(_stockGrid) ? CurrentStock()?.Id : null;
+
+            _stockGrid.DataSource = null;
+            _stockGrid.DataSource = rows;
+            SizeColumnsToContent(_stockGrid);
+            if (keep is Guid id)
+                SelectRow<StockRow>(_stockGrid, row => row.Source.Id == id);
+            else
+                ClearGridSelection(_stockGrid);
+
+            var summary = _lowStockOnly.Checked
+                ? lowStock.Count == 0
+                    ? $"{branchName} has no items at or below their reorder level."
+                    : $"{lowStock.Count} item(s) at or below their reorder level at {branchName}."
+                : lowStock.Count == 0
+                    ? $"{rows.Count} product(s) at {branchName}."
+                    : $"{rows.Count} product(s) at {branchName}. {lowStock.Count} need reordering.";
+
+            _stockHintText = branchName is null
+                ? "No available branch was found for this account."
+                : searching
+                    ? rows.Count == 0
+                        ? $"No stock items match \"{query}\"."
+                        : $"Showing {rows.Count} matching item(s). Double-click a row for details."
+                    : summary;
+            RefreshHints();
+            UpdateStockActions();
+        }
+
+        private void BindMovements()
+        {
+            var query = _movementSearchText.Trim();
+            var searching = query.Length > 0;
+
+            var rows = _movements
+                .Where(movement => !searching || MatchesSearch(
+                    query,
+                    movement.OccurredAtUtc.ToLocalTime(),
+                    movement.Type,
+                    movement.Sku,
+                    movement.ProductName,
+                    movement.BranchName,
+                    movement.DestinationBranchName,
+                    movement.Quantity,
+                    movement.QuantityChange,
+                    movement.Reference,
+                    movement.Notes))
+                .Select(ToMovementRow)
+                .ToList();
+
+            _movementsGrid.DataSource = null;
+            _movementsGrid.DataSource = rows;
+            SizeColumnsToContent(_movementsGrid);
+            ClearGridSelection(_movementsGrid);
+
+            var branchName = _selectedBranch?.Name;
+            _movementsHintText = branchName is null
+                ? "No available branch was found for this account."
+                : searching
+                    ? rows.Count == 0
+                        ? $"No stock movements match \"{query}\"."
+                        : $"Showing {rows.Count} matching movement(s) for {branchName}. Double-click a row for details."
+                    : rows.Count == 0
+                        ? $"No stock movements recorded yet for {branchName}."
+                        : $"{rows.Count} stock movement(s) for {branchName}. Double-click a row for details.";
+            RefreshHints();
+        }
+
         private static ProductRow ToProductRow(InventoryProductDto product) => new(
             product.Sku,
             product.Name,
@@ -1426,6 +1912,40 @@ namespace ThreadFlow.WinForms
             receipt.Reference ?? string.Empty,
             receipt);
 
+        private static OrderRow ToOrderRow(InventoryPurchaseOrderDto order) => new(
+            order.Number,
+            order.SupplierName,
+            order.Status,
+            order.CreatedAtUtc.ToLocalTime(),
+            order.ExpectedAtUtc?.ToLocalTime(),
+            order.Lines.Sum(line => line.QuantityOrdered),
+            order.Lines.Sum(line => line.QuantityReceived),
+            order);
+
+        private static StockRow ToStockRow(InventoryProductDto product) => new(
+            product.Sku,
+            product.Name,
+            product.Color ?? string.Empty,
+            product.Size ?? string.Empty,
+            product.QuantityOnHand,
+            product.ReorderLevel,
+            string.IsNullOrWhiteSpace(product.SupplierName) ? "—" : product.SupplierName,
+            product.IsActive ? "Active" : "Inactive",
+            product);
+
+        private static MovementRow ToMovementRow(InventoryStockMovementDto movement) => new(
+            movement.OccurredAtUtc.ToLocalTime(),
+            movement.Type,
+            movement.Sku,
+            movement.ProductName,
+            movement.BranchName,
+            string.IsNullOrWhiteSpace(movement.DestinationBranchName) ? "—" : movement.DestinationBranchName,
+            movement.Quantity,
+            movement.QuantityChange,
+            movement.Reference ?? string.Empty,
+            movement.Notes ?? string.Empty,
+            movement);
+
         // ---- Selection and button state ----
 
         private InventoryProductDto? CurrentProduct() =>
@@ -1434,11 +1954,156 @@ namespace ThreadFlow.WinForms
         private InventorySupplierDto? CurrentSupplier() =>
             (_suppliersGrid.CurrentRow?.DataBoundItem as SupplierRow)?.Source;
 
+        private InventoryPurchaseOrderDto? CurrentOrder() =>
+            (_ordersGrid.CurrentRow?.DataBoundItem as OrderRow)?.Source;
+
+        private InventoryProductDto? CurrentStock() =>
+            (_stockGrid.CurrentRow?.DataBoundItem as StockRow)?.Source;
+
+        private void UpdateOrderActions()
+        {
+            var order = CurrentOrder();
+            var isDraft = order?.Status == "Draft";
+            var isReceivable = order is not null && order.Status is "Ordered" or "PartiallyReceived";
+
+            _newOrder.Enabled = _selectedBranch is not null;
+            _editOrder.Enabled = isDraft;
+            _placeOrder.Enabled = isDraft;
+            _receiveOrder.Enabled = isReceivable;
+            _cancelOrder.Enabled = isDraft || isReceivable;
+        }
+
+        private void UpdateStockActions()
+        {
+            var canAdjust = _selectedBranch is not null && CurrentStock() is not null;
+            _setReorderLevel.Enabled = canAdjust;
+            _adjustStock.Enabled = canAdjust;
+            _physicalCount.Enabled = canAdjust;
+            _returnToSupplier.Enabled = canAdjust;
+            _transferBranch.Enabled = canAdjust;
+        }
+
+        private void PrintCurrentProductLabels()
+        {
+            // The button is disabled without a selection, so there is nothing to explain here.
+            if (CurrentProduct() is not { } product)
+                return;
+
+            var quantity = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 500,
+                Value = 1,
+                ThousandsSeparator = true
+            };
+
+            var form = MakeFormGrid(2);
+            AddField(form, MakeField("Labels to print", quantity, required: true), 0, 0, span: 2);
+            AddField(form, MakeHintPanel(
+                "Each label prints the SKU, the product name and the colour / size. " +
+                "Labels are laid out three across on the page."), 0, 1, span: 2);
+
+            var labelsToPrint = 1;
+
+            Task<string?> SaveAsync()
+            {
+                labelsToPrint = decimal.ToInt32(quantity.Value);
+                return Task.FromResult<string?>(null);
+            }
+
+            using var dialog = new EditorDialog(
+                "Products",
+                "Print SKU labels",
+                $"{product.Sku} — {product.Name}",
+                "Preview labels",
+                form,
+                2 * FieldRowHeight,
+                SaveAsync);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
+            {
+                using var document = new PrintDocument { DocumentName = $"SKU labels — {product.Sku}" };
+                if (!document.PrinterSettings.IsValid)
+                {
+                    MessageBox.Show(this, "No printer is configured on this computer.", "Print SKU labels", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var remaining = labelsToPrint;
+                document.BeginPrint += (_, _) => remaining = labelsToPrint;
+                document.DefaultPageSettings.Margins = new Margins(24, 24, 24, 24);
+                document.PrintPage += (_, e) =>
+                {
+                    var graphics = e.Graphics;
+                    if (graphics is null)
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                    var bounds = e.MarginBounds;
+                    const int columns = 3;
+                    const int labelHeight = 108;
+                    var rows = Math.Max(1, bounds.Height / labelHeight);
+                    var labelWidth = bounds.Width / columns;
+                    using var border = new Pen(TableHeaderLineColor, 0.8f);
+                    using var bandBrush = new SolidBrush(Color.FromArgb(238, 242, 252));
+                    using var skuFont = new Font("Segoe UI Semibold", 11.5F, FontStyle.Bold);
+                    using var nameFont = new Font("Segoe UI", 9F, FontStyle.Regular);
+                    using var detailFont = new Font("Segoe UI", 8.5F, FontStyle.Regular);
+                    var variation = string.Join(" · ", new[] { product.Color, product.Size }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                    var price = product.UnitPrice.ToString("N2");
+                    var printed = Math.Min(remaining, columns * rows);
+                    for (var index = 0; index < printed; index++)
+                    {
+                        // Gutters keep neighbouring labels from reading as one block on the sheet.
+                        var rect = new Rectangle(bounds.Left + (index % columns) * labelWidth + 6,
+                            bounds.Top + (index / columns) * labelHeight + 6, labelWidth - 12, labelHeight - 12);
+                        var band = new Rectangle(rect.X, rect.Y, rect.Width, 28);
+                        graphics.FillRectangle(bandBrush, band);
+                        graphics.DrawRectangle(border, rect);
+                        graphics.DrawLine(border, band.Left, band.Bottom, band.Right, band.Bottom);
+                        TextRenderer.DrawText(graphics, product.Sku, skuFont,
+                            new Rectangle(band.X + 8, band.Y, band.Width - 16 - 58, band.Height), Color.Black,
+                            TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                        TextRenderer.DrawText(graphics, price, detailFont,
+                            new Rectangle(band.Right - 8 - 52, band.Y, 52, band.Height), Color.Black,
+                            TextFormatFlags.Right | TextFormatFlags.VerticalCenter |
+                            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+                        TextRenderer.DrawText(graphics, product.Name, nameFont,
+                            new Rectangle(rect.X + 8, rect.Y + 34, rect.Width - 16, 22), Color.Black,
+                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                        TextRenderer.DrawText(graphics, variation, detailFont,
+                            new Rectangle(rect.X + 8, rect.Y + 58, rect.Width - 16, 20), Color.FromArgb(70, 75, 85),
+                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    }
+                    remaining -= printed;
+                    e.HasMorePages = remaining > 0;
+                };
+                using var preview = new PrintPreviewDialog
+                {
+                    Document = document,
+                    Text = $"SKU labels — {product.Sku}",
+                    Width = 1000,
+                    Height = 760,
+                    UseAntiAlias = true,
+                    BackColor = Palette.BackgroundSecondary.Color
+                };
+                preview.ShowDialog(this);
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(this, exception.Message, "Could not prepare SKU labels", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void UpdateProductActions()
         {
             var product = CurrentProduct();
             _editProduct.Enabled = product is not null;
             _toggleProduct.Enabled = product is not null;
+            _printSkuLabels.Enabled = product is not null;
             _toggleProduct.Text = product is { IsActive: false } ? "Reactivate" : "Deactivate";
             UpdateReceiveActions();
         }
@@ -1774,6 +2439,746 @@ namespace ThreadFlow.WinForms
             dialog.ShowDialog(this);
         }
 
+        // ---- Purchase orders ----
+
+        private void ShowSelectedStockDetails()
+        {
+            if (_stockGrid.CurrentRow?.DataBoundItem is not StockRow row)
+                return;
+
+            var product = row.Source;
+            MessageBox.Show(this,
+                $"SKU: {product.Sku}\r\n" +
+                $"Product: {product.Name}\r\n" +
+                $"Color: {(string.IsNullOrWhiteSpace(product.Color) ? "—" : product.Color)}\r\n" +
+                $"Size: {(string.IsNullOrWhiteSpace(product.Size) ? "—" : product.Size)}\r\n" +
+                $"On hand: {product.QuantityOnHand}\r\n" +
+                $"Reorder alert at: {(product.ReorderLevel > 0 ? product.ReorderLevel.ToString() : "Not set")}\r\n" +
+                $"Supplier: {(string.IsNullOrWhiteSpace(product.SupplierName) ? "Unspecified" : product.SupplierName)}\r\n" +
+                $"Unit price: {product.UnitPrice:N2}\r\n" +
+                $"Status: {(product.IsActive ? "Active" : "Inactive")}",
+                "Stock details", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ShowSelectedMovementDetails()
+        {
+            if (_movementsGrid.CurrentRow?.DataBoundItem is not MovementRow row)
+                return;
+
+            var movement = row.Source;
+            MessageBox.Show(this,
+                $"When: {movement.OccurredAtUtc.ToLocalTime():f}\r\n" +
+                $"Type: {movement.Type}\r\n" +
+                $"SKU: {movement.Sku}\r\n" +
+                $"Product: {movement.ProductName}\r\n" +
+                $"Branch: {movement.BranchName}\r\n" +
+                $"To branch: {(string.IsNullOrWhiteSpace(movement.DestinationBranchName) ? "—" : movement.DestinationBranchName)}\r\n" +
+                $"Quantity: {movement.Quantity}\r\n" +
+                $"Change: {movement.QuantityChange:+#;-#;0}\r\n" +
+                $"Reference: {(string.IsNullOrWhiteSpace(movement.Reference) ? "None" : movement.Reference)}\r\n" +
+                $"Notes: {(string.IsNullOrWhiteSpace(movement.Notes) ? "None" : movement.Notes)}",
+                "Stock movement details", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private async Task ShowOrderDialogAsync(InventoryPurchaseOrderDto? existing)
+        {
+            if (_selectedBranch is not { } branch)
+            {
+                MessageBox.Show(this, "No assigned branch is available for this account.",
+                    "Purchase orders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (existing is not null && existing.Status != "Draft")
+            {
+                MessageBox.Show(this, "Only draft purchase orders can be edited.",
+                    "Purchase orders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var supplierChoices = _suppliers
+                .Where(supplier => supplier.IsActive || supplier.Id == existing?.SupplierId)
+                .OrderBy(supplier => supplier.Name)
+                .Select(supplier => new SupplierChoice(
+                    supplier.Id,
+                    supplier.IsActive ? supplier.Name : $"{supplier.Name} (inactive)"))
+                .ToList();
+            if (supplierChoices.Count == 0)
+            {
+                MessageBox.Show(this, "Add an active supplier before creating a purchase order.",
+                    "Purchase orders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var productChoices = _products
+                .Where(product => product.IsActive)
+                .OrderBy(product => product.Name)
+                .Select(product => new ProductChoice(
+                    product.Id, $"{product.Sku} — {product.Name}", product.SupplierId))
+                .ToList();
+            if (productChoices.Count == 0)
+            {
+                MessageBox.Show(this, "Add an active product before creating a purchase order.",
+                    "Purchase orders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var supplier = new SelectBox();
+            supplier.DataSource = supplierChoices;
+            supplier.DisplayMember = nameof(SupplierChoice.Label);
+            supplier.ValueMember = nameof(SupplierChoice.Id);
+
+            var expected = new DateField { AllowClear = true };
+
+            var notes = new TextBox { MaxLength = 1000 };
+
+            var product = new SelectBox();
+            product.DataSource = productChoices;
+            product.DisplayMember = nameof(ProductChoice.Label);
+            product.ValueMember = nameof(ProductChoice.Id);
+
+            var quantity = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 1000000,
+                ThousandsSeparator = true
+            };
+            quantity.Value = 1;
+
+            var unitCost = new NumericUpDown
+            {
+                DecimalPlaces = 2,
+                ThousandsSeparator = true,
+                Maximum = 100000000
+            };
+
+            var lines = new List<SavePurchaseOrderLineRequest>();
+            if (existing is not null)
+            {
+                foreach (var line in existing.Lines)
+                    lines.Add(new SavePurchaseOrderLineRequest(line.ProductId, line.QuantityOrdered, line.UnitCost));
+            }
+
+            var linesGrid = new DataGridView();
+            StyleGrid(linesGrid);
+            AddGridColumn(linesGrid, nameof(OrderLineRow.Sku), "SKU",
+                DataGridViewAutoSizeColumnMode.AllCells, 100, 70);
+            AddGridColumn(linesGrid, nameof(OrderLineRow.Product), "Product",
+                DataGridViewAutoSizeColumnMode.Fill, 160, 110, wrap: true);
+            AddGridColumn(linesGrid, nameof(OrderLineRow.Quantity), "Quantity",
+                DataGridViewAutoSizeColumnMode.AllCells, 100, 80, format: "N0", alignRight: true);
+            AddGridColumn(linesGrid, nameof(OrderLineRow.UnitCost), "Unit cost",
+                DataGridViewAutoSizeColumnMode.AllCells, 100, 90, format: "N2", alignRight: true);
+
+            void BindLines()
+            {
+                linesGrid.DataSource = null;
+                linesGrid.DataSource = lines
+                    .Select(line =>
+                    {
+                        var match = _products.FirstOrDefault(item => item.Id == line.ProductId);
+                        return new OrderLineRow(
+                            match?.Sku ?? "—",
+                            match?.Name ?? "Unknown product",
+                            line.Quantity,
+                            line.UnitCost);
+                    })
+                    .ToList();
+            }
+
+            BindLines();
+
+            var addLine = MakePrimaryButton("Add line");
+            addLine.Size = new Size(104, 36);
+            addLine.Margin = new Padding(8, 0, 0, 0);
+
+            var removeLine = MakeSecondaryButton("Remove line");
+            removeLine.Size = new Size(120, 36);
+            removeLine.Margin = Padding.Empty;
+
+            addLine.Click += (_, _) =>
+            {
+                if (product.SelectedItem is not ProductChoice choice)
+                    return;
+
+                if (lines.Any(line => line.ProductId == choice.Id))
+                {
+                    MessageBox.Show(addLine.FindForm(),
+                        "That product is already on this order. Remove its current line first if you want to replace it.",
+                        "Purchase order", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                lines.Add(new SavePurchaseOrderLineRequest(
+                    choice.Id, decimal.ToInt32(quantity.Value), unitCost.Value));
+                BindLines();
+            };
+
+            removeLine.Click += (_, _) =>
+            {
+                var index = linesGrid.CurrentRow?.Index ?? -1;
+                if (index < 0 || index >= lines.Count)
+                    return;
+
+                lines.RemoveAt(index);
+                BindLines();
+            };
+
+            var lineButtons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                BackColor = Palette.BackgroundSecondary.Color,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 4, 0, 4)
+            };
+            lineButtons.Controls.Add(addLine);
+            lineButtons.Controls.Add(removeLine);
+
+            var fields = MakeFormGrid(4);
+            AddField(fields, MakeField("Supplier", supplier, required: true), 0, 0);
+            AddField(fields, MakeField("Expected delivery (optional)", expected), 1, 0);
+            AddField(fields, MakeField("Item to add", product, required: true), 0, 1, span: 2);
+            AddField(fields, MakeField("Quantity", quantity, required: true), 0, 2);
+            AddField(fields, MakeField("Unit cost", unitCost), 1, 2);
+            AddField(fields, MakeField("Notes (optional)", notes), 0, 3, span: 2);
+            fields.Dock = DockStyle.Top;
+            fields.Height = 4 * FieldRowHeight;
+
+            var body = new Panel { BackColor = Palette.BackgroundSecondary.Color };
+            linesGrid.Dock = DockStyle.Fill;
+            body.Controls.Add(linesGrid);
+            body.Controls.Add(lineButtons);
+            body.Controls.Add(fields);
+
+            async Task<string?> SaveAsync()
+            {
+                if (supplier.SelectedItem is not SupplierChoice choice || choice.Id is not Guid supplierId)
+                    return "Choose the supplier for this order.";
+                if (lines.Count == 0)
+                    return "Add at least one product line.";
+
+                try
+                {
+                    var request = new SavePurchaseOrderRequest(
+                        branch.Id,
+                        supplierId,
+                        expected.Value is DateTime expectedAt ? expectedAt.ToUniversalTime() : null,
+                        notes.Text.Trim(),
+                        lines.ToList());
+                    var saved = await _api.SavePurchaseOrderAsync(existing?.Id, request);
+                    await RefreshOrdersAsync();
+                    _ordersHintText = existing is null
+                        ? $"Saved draft {saved.Number}."
+                        : $"Updated draft {saved.Number}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                existing is null ? "New purchase order" : "Edit purchase order",
+                existing is null ? "New draft" : "Edit draft",
+                existing is null
+                    ? $"Drafting an order for {branch.Name}."
+                    : $"Updating {existing.Number} for {branch.Name}.",
+                "Save draft",
+                body,
+                4 * FieldRowHeight + 44 + 150,
+                SaveAsync,
+                () =>
+                {
+                    if (existing is not null)
+                    {
+                        var index = supplierChoices.FindIndex(choice => choice.Id == existing.SupplierId);
+                        if (index >= 0)
+                            supplier.SelectedIndex = index;
+
+                        notes.Text = existing.Notes;
+                        if (existing.ExpectedAtUtc is DateTime expectedAt)
+                            expected.Value = expectedAt.ToLocalTime();
+                    }
+
+                    BindLines();
+                });
+            dialog.ShowDialog(this);
+        }
+
+        private async Task PlaceOrderAsync()
+        {
+            if (CurrentOrder() is not { } order)
+                return;
+
+            if (MessageBox.Show(this,
+                    $"Place purchase order {order.Number} with {order.SupplierName}?",
+                    "Place purchase order", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            try
+            {
+                await _api.PlacePurchaseOrderAsync(order.Id);
+                await RefreshOrdersAsync();
+                _ordersHintText = $"Placed {order.Number}. Waiting for the delivery.";
+                RefreshHints();
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not place the purchase order", InventoryPage.Orders);
+            }
+        }
+
+        private async Task CancelOrderAsync()
+        {
+            if (CurrentOrder() is not { } order)
+                return;
+
+            if (MessageBox.Show(this, $"Cancel purchase order {order.Number}?",
+                    "Cancel purchase order", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            try
+            {
+                await _api.CancelPurchaseOrderAsync(order.Id);
+                await RefreshOrdersAsync();
+                _ordersHintText = $"Cancelled {order.Number}.";
+                RefreshHints();
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not cancel the purchase order", InventoryPage.Orders);
+            }
+        }
+
+        private async Task ReceiveOrderAsync()
+        {
+            if (CurrentOrder() is not { } order)
+                return;
+
+            if (order.Status is not ("Ordered" or "PartiallyReceived"))
+            {
+                MessageBox.Show(this, "Place the order before receiving items.",
+                    "Receive items", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var openLines = order.Lines
+                .Where(line => line.QuantityOrdered > line.QuantityReceived)
+                .ToList();
+            if (openLines.Count == 0)
+            {
+                MessageBox.Show(this, "Every line on this order has already been received.",
+                    "Receive items", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var grid = new DataGridView();
+            StyleGrid(grid);
+            grid.ReadOnly = false;
+            grid.EditMode = DataGridViewEditMode.EditOnEnter;
+            AddGridColumn(grid, "Sku", "SKU", DataGridViewAutoSizeColumnMode.AllCells, 100, 70);
+            AddGridColumn(grid, "Product", "Product", DataGridViewAutoSizeColumnMode.Fill, 160, 110, wrap: true);
+            AddGridColumn(grid, "Remaining", "Remaining", DataGridViewAutoSizeColumnMode.AllCells, 100, 90, format: "N0", alignRight: true);
+            AddGridColumn(grid, "ReceiveNow", "Receive now", DataGridViewAutoSizeColumnMode.AllCells, 100, 95, format: "N0", alignRight: true);
+
+            foreach (DataGridViewColumn column in grid.Columns)
+                column.ReadOnly = column.Name != "ReceiveNow";
+
+            foreach (var line in openLines)
+                grid.Rows.Add(line.Sku, line.ProductName, line.QuantityOrdered - line.QuantityReceived, 0);
+
+            var reference = new TextBox { MaxLength = 80 };
+            var fields = MakeFormGrid(1);
+            AddField(fields, MakeField("Delivery reference (optional)", reference), 0, 0, span: 2);
+            fields.Dock = DockStyle.Top;
+            fields.Height = FieldRowHeight;
+
+            var body = new Panel { BackColor = Palette.BackgroundSecondary.Color };
+            grid.Dock = DockStyle.Fill;
+            body.Controls.Add(grid);
+            body.Controls.Add(fields);
+
+            async Task<string?> SaveAsync()
+            {
+                grid.EndEdit();
+
+                var requests = new List<ReceivePurchaseOrderLineRequest>();
+                for (var index = 0; index < openLines.Count; index++)
+                {
+                    var raw = Convert.ToString(grid.Rows[index].Cells["ReceiveNow"].Value);
+                    if (string.IsNullOrWhiteSpace(raw))
+                        continue;
+
+                    if (!int.TryParse(raw, out var received))
+                        return "Enter whole numbers in Receive now.";
+
+                    var remaining = openLines[index].QuantityOrdered - openLines[index].QuantityReceived;
+                    if (received < 0 || received > remaining)
+                        return $"Receive now for {openLines[index].Sku} must be between 0 and {remaining}.";
+
+                    if (received > 0)
+                        requests.Add(new ReceivePurchaseOrderLineRequest(openLines[index].Id, received));
+                }
+
+                if (requests.Count == 0)
+                    return "Enter at least one received quantity.";
+
+                try
+                {
+                    await _api.ReceivePurchaseOrderAsync(
+                        order.Id, new ReceivePurchaseOrderRequest(reference.Text.Trim(), requests));
+                    await RefreshAllAsync();
+                    _ordersHintText = $"Received items for {order.Number}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Receive items",
+                $"Receive items — {order.Number}",
+                $"{order.SupplierName}. Enter what actually arrived.",
+                "Record receipt",
+                body,
+                FieldRowHeight + 240,
+                SaveAsync);
+            dialog.ShowDialog(this);
+        }
+
+        // ---- Stock control ----
+
+        private async Task SetReorderLevelAsync()
+        {
+            if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
+                return;
+
+            var level = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 1000000,
+                ThousandsSeparator = true
+            };
+            level.Value = Math.Clamp(product.ReorderLevel, 0, 1000000);
+
+            var form = MakeFormGrid(1);
+            AddField(form, MakeField("Alert when on-hand reaches or falls below", level, required: true), 0, 0, span: 2);
+
+            async Task<string?> SaveAsync()
+            {
+                try
+                {
+                    var value = decimal.ToInt32(level.Value);
+                    await _api.SetReorderLevelAsync(branch.Id, product.Id, value);
+                    await RefreshProductsAsync(product.Id);
+                    _stockHintText = $"{product.Sku} now alerts at or below {value} unit(s).";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Stock control",
+                "Set low-stock alert",
+                $"{product.Sku} — {product.Name}",
+                "Save",
+                form,
+                FieldRowHeight,
+                SaveAsync);
+            dialog.ShowDialog(this);
+        }
+
+        private async Task AdjustStockAsync()
+        {
+            if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
+                return;
+
+            var change = new NumericUpDown
+            {
+                Minimum = -1000000,
+                Maximum = 1000000,
+                ThousandsSeparator = true
+            };
+            change.Value = 1;
+
+            var reason = new TextBox { MaxLength = 500 };
+            var reference = new TextBox { MaxLength = 80 };
+
+            var form = MakeFormGrid(3);
+            AddField(form, MakeField("Quantity change (negative writes off)", change, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Reason", reason, required: true), 0, 1, span: 2);
+            AddField(form, MakeField("Reference (optional)", reference), 0, 2, span: 2);
+
+            async Task<string?> SaveAsync()
+            {
+                var quantity = decimal.ToInt32(change.Value);
+                if (quantity == 0)
+                    return "Enter a non-zero adjustment.";
+                if (string.IsNullOrWhiteSpace(reason.Text))
+                    return "Enter the reason for the adjustment.";
+
+                try
+                {
+                    await _api.AdjustStockAsync(new AdjustInventoryStockRequest(
+                        branch.Id, product.Id, quantity, reason.Text.Trim(), reference.Text.Trim()));
+                    await RefreshAllAsync();
+                    _stockHintText = $"Adjusted {product.Sku} by {quantity:+#;-#;0} unit(s).";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Stock control",
+                "Adjust stock",
+                $"{product.Sku} — {product.Name}. On hand: {product.QuantityOnHand}.",
+                "Adjust stock",
+                form,
+                3 * FieldRowHeight,
+                SaveAsync);
+            dialog.ShowDialog(this);
+        }
+
+        private async Task RecordStockCountAsync()
+        {
+            if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
+                return;
+
+            var counted = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 1000000,
+                ThousandsSeparator = true
+            };
+            counted.Value = Math.Clamp(product.QuantityOnHand, 0, 1000000);
+
+            var reference = new TextBox { MaxLength = 80 };
+            var notes = new TextBox { MaxLength = 500 };
+
+            var form = MakeFormGrid(3);
+            AddField(form, MakeField("Quantity physically counted", counted, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Reference (optional)", reference), 0, 1, span: 2);
+            AddField(form, MakeField("Notes (optional)", notes), 0, 2, span: 2);
+
+            async Task<string?> SaveAsync()
+            {
+                try
+                {
+                    var value = decimal.ToInt32(counted.Value);
+                    await _api.RecordStockCountAsync(new RecordInventoryStockCountRequest(
+                        branch.Id, product.Id, value, reference.Text.Trim(), notes.Text.Trim()));
+                    await RefreshAllAsync();
+                    _stockHintText = $"Counted {value} unit(s) of {product.Sku} at {branch.Name}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Stock control",
+                "Physical stock count",
+                $"{product.Sku} — {product.Name}. On hand: {product.QuantityOnHand}.",
+                "Record count",
+                form,
+                3 * FieldRowHeight,
+                SaveAsync);
+            dialog.ShowDialog(this);
+        }
+
+        private async Task ReturnToSupplierAsync()
+        {
+            if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
+                return;
+
+            if (product.QuantityOnHand <= 0)
+            {
+                MessageBox.Show(this, "There is no stock on hand to return.",
+                    "Return to supplier", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var supplierChoices = _suppliers
+                .Where(supplier => supplier.IsActive)
+                .OrderBy(supplier => supplier.Name)
+                .Select(supplier => new SupplierChoice(supplier.Id, supplier.Name))
+                .ToList();
+            if (supplierChoices.Count == 0)
+            {
+                MessageBox.Show(this, "Add an active supplier before returning stock.",
+                    "Return to supplier", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var supplier = new SelectBox();
+            supplier.DataSource = supplierChoices;
+            supplier.DisplayMember = nameof(SupplierChoice.Label);
+            supplier.ValueMember = nameof(SupplierChoice.Id);
+
+            var quantity = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = Math.Max(1, product.QuantityOnHand),
+                ThousandsSeparator = true
+            };
+            quantity.Value = 1;
+
+            var reason = new TextBox { MaxLength = 500 };
+            var reference = new TextBox { MaxLength = 80 };
+
+            var form = MakeFormGrid(4);
+            AddField(form, MakeField("Supplier", supplier, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Quantity", quantity, required: true), 0, 1, span: 2);
+            AddField(form, MakeField("Reason", reason, required: true), 0, 2, span: 2);
+            AddField(form, MakeField("Reference (optional)", reference), 0, 3, span: 2);
+
+            async Task<string?> SaveAsync()
+            {
+                if (supplier.SelectedItem is not SupplierChoice choice || choice.Id is not Guid supplierId)
+                    return "Choose the supplier the goods go back to.";
+                if (string.IsNullOrWhiteSpace(reason.Text))
+                    return "Enter the reason for the return.";
+
+                try
+                {
+                    var value = decimal.ToInt32(quantity.Value);
+                    await _api.ReturnStockAsync(new ReturnInventoryStockRequest(
+                        branch.Id, product.Id, supplierId, value, reason.Text.Trim(), reference.Text.Trim()));
+                    await RefreshAllAsync();
+                    _stockHintText = $"Returned {value} unit(s) of {product.Sku} to {choice.Label}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Stock control",
+                "Return to supplier",
+                $"{product.Sku} — {product.Name}. On hand: {product.QuantityOnHand}.",
+                "Record return",
+                form,
+                4 * FieldRowHeight,
+                SaveAsync,
+                () =>
+                {
+                    var index = supplierChoices.FindIndex(choice => choice.Id == product.SupplierId);
+                    if (index >= 0)
+                        supplier.SelectedIndex = index;
+                });
+            dialog.ShowDialog(this);
+        }
+
+        private async Task TransferBranchAsync()
+        {
+            if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
+                return;
+
+            if (product.QuantityOnHand <= 0)
+            {
+                MessageBox.Show(this, "There is no stock on hand to transfer.",
+                    "Transfer branch", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            List<InventoryBranchDto> destinations;
+            try
+            {
+                destinations = await _api.GetTransferDestinationsAsync();
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not load branch destinations", InventoryPage.StockControl);
+                return;
+            }
+
+            var targets = destinations
+                .Where(destination => destination.Id != branch.Id)
+                .Select(destination => new InventoryBranchChoice(destination.Id, destination.Name))
+                .ToList();
+            if (targets.Count == 0)
+            {
+                MessageBox.Show(this, "No other active branches are available for transfer.",
+                    "Transfer branch", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var destinationBox = new SelectBox();
+            destinationBox.DataSource = targets;
+            destinationBox.DisplayMember = nameof(InventoryBranchChoice.Name);
+            destinationBox.ValueMember = nameof(InventoryBranchChoice.Id);
+
+            var quantity = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = Math.Max(1, product.QuantityOnHand),
+                ThousandsSeparator = true
+            };
+            quantity.Value = 1;
+
+            var reference = new TextBox { MaxLength = 80 };
+            var notes = new TextBox { MaxLength = 500 };
+
+            var form = MakeFormGrid(4);
+            AddField(form, MakeField("Destination branch", destinationBox, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Quantity", quantity, required: true), 0, 1, span: 2);
+            AddField(form, MakeField("Reference (optional)", reference), 0, 2, span: 2);
+            AddField(form, MakeField("Notes (optional)", notes), 0, 3, span: 2);
+
+            async Task<string?> SaveAsync()
+            {
+                if (destinationBox.SelectedItem is not InventoryBranchChoice target)
+                    return "Choose the branch that receives the stock.";
+
+                try
+                {
+                    var value = decimal.ToInt32(quantity.Value);
+                    await _api.TransferStockAsync(new TransferInventoryStockRequest(
+                        branch.Id, target.Id, product.Id, value, reference.Text.Trim(), notes.Text.Trim()));
+                    await RefreshAllAsync();
+                    _stockHintText = $"Transferred {value} unit(s) of {product.Sku} to {target.Name}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                "Stock control",
+                "Transfer branch",
+                $"{product.Sku} — {product.Name}. On hand: {product.QuantityOnHand}.",
+                "Transfer",
+                form,
+                4 * FieldRowHeight,
+                SaveAsync);
+            dialog.ShowDialog(this);
+        }
+
         private void BindSupplierChoices(ComboBox combo, Guid? selectedId, string emptyLabel)
         {
             // Inactive suppliers are hidden unless they are the one already linked.
@@ -1864,6 +3269,27 @@ namespace ThreadFlow.WinForms
             return panel;
         }
 
+        /// <summary>A muted note under a field, so a dialog can explain itself without adding an input.</summary>
+        private static Panel MakeHintPanel(string text)
+        {
+            var panel = new Panel
+            {
+                BackColor = BrandTints.iceBlue.Color,
+                Padding = new Padding(12, 0, 12, 0)
+            };
+            var note = new Label
+            {
+                Text = text,
+                Font = SubtitleFont,
+                ForeColor = Palette.TextSecondary.Color,
+                BackColor = Color.Transparent,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            panel.Controls.Add(note);
+            return panel;
+        }
+
         private static string DescribeError(Exception exception)
         {
             var message = exception.Message;
@@ -1882,6 +3308,15 @@ namespace ThreadFlow.WinForms
                     break;
                 case InventoryPage.Suppliers:
                     _suppliersHintText = "Could not complete the request.";
+                    break;
+                case InventoryPage.Orders:
+                    _ordersHintText = "Could not complete the request.";
+                    break;
+                case InventoryPage.StockControl:
+                    _stockHintText = "Could not complete the request.";
+                    break;
+                case InventoryPage.StockHistory:
+                    _movementsHintText = "Could not complete the request.";
                     break;
                 default:
                     _receiptsHintText = "Could not complete the request.";
@@ -1908,6 +3343,9 @@ namespace ThreadFlow.WinForms
             ApplyGridMetrics(_productsGrid);
             ApplyGridMetrics(_suppliersGrid);
             ApplyGridMetrics(_receiptsGrid);
+            ApplyGridMetrics(_ordersGrid);
+            ApplyGridMetrics(_stockGrid);
+            ApplyGridMetrics(_movementsGrid);
 
             // Windows 11 (build 22000+) rounds window corners by default; ask for square corners.
             // Older versions ignore this.
@@ -1959,6 +3397,46 @@ namespace ThreadFlow.WinForms
             int Quantity,
             string Reference,
             InventoryStockReceiptDto Source);
+
+        private sealed record OrderRow(
+            string Number,
+            string Supplier,
+            string Status,
+            DateTime Created,
+            DateTime? Expected,
+            int UnitsOrdered,
+            int UnitsReceived,
+            InventoryPurchaseOrderDto Source);
+
+        private sealed record StockRow(
+            string Sku,
+            string Product,
+            string Color,
+            string Size,
+            int OnHand,
+            int ReorderLevel,
+            string Supplier,
+            string Status,
+            InventoryProductDto Source);
+
+        private sealed record MovementRow(
+            DateTime When,
+            string Type,
+            string Sku,
+            string Product,
+            string Branch,
+            string Destination,
+            int Quantity,
+            int Change,
+            string Reference,
+            string Notes,
+            InventoryStockMovementDto Source);
+
+        private sealed record OrderLineRow(
+            string Sku,
+            string Product,
+            int Quantity,
+            decimal UnitCost);
 
         private sealed record SupplierChoice(Guid? Id, string Label);
         private sealed record ProductChoice(Guid Id, string Label, Guid? SupplierId);
@@ -2235,6 +3713,618 @@ namespace ThreadFlow.WinForms
         }
 
         /// <summary>
+        /// The dialog date input: a rounded box that reads like every other field, shows the chosen
+        /// day, and opens a themed month calendar. An optional date is cleared with the small × at
+        /// the right, so there is no checkbox whose meaning has to be guessed.
+        /// </summary>
+        private sealed class DateField : Control
+        {
+            private DateTime? _value;
+            private CalendarPopup? _popup;
+            private Rectangle _clearBounds;
+            private bool _hover;
+
+            public DateField()
+            {
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw |
+                    ControlStyles.Selectable |
+                    ControlStyles.StandardClick,
+                    true);
+
+                BackColor = Palette.BackgroundSecondary.Color;
+                Font = FieldFont;
+                TabStop = true;
+                Cursor = Cursors.Hand;
+                AccessibleRole = AccessibleRole.PushButton;
+                Size = new Size(240, 30);
+            }
+
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+            public DateTime? Value
+            {
+                get => _value;
+                set
+                {
+                    _value = value?.Date;
+                    Invalidate();
+                }
+            }
+
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+            public bool AllowClear { get; set; }
+
+            public event EventHandler? ValueChanged;
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                _hover = true;
+                Invalidate();
+                base.OnMouseEnter(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                _hover = false;
+                Invalidate();
+                base.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                base.OnMouseDown(e);
+                if (e.Button != MouseButtons.Left)
+                    return;
+
+                if (!_clearBounds.IsEmpty && _clearBounds.Contains(e.Location))
+                {
+                    SetValue(null);
+                    return;
+                }
+
+                Focus();
+                ToggleCalendar();
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (e.KeyCode is Keys.Space or Keys.Enter or Keys.Down)
+                {
+                    ToggleCalendar();
+                    e.Handled = true;
+                }
+                else if (e.KeyCode is Keys.Delete or Keys.Back && AllowClear)
+                {
+                    SetValue(null);
+                    e.Handled = true;
+                }
+
+                base.OnKeyDown(e);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                    _popup?.Close();
+
+                base.Dispose(disposing);
+            }
+
+            private void SetValue(DateTime? value)
+            {
+                if (_value == value)
+                    return;
+
+                _value = value;
+                Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            private void ToggleCalendar()
+            {
+                if (_popup is { Visible: true })
+                {
+                    _popup.Close();
+                    return;
+                }
+
+                var owner = FindForm();
+                if (owner is null)
+                    return;
+
+                var popup = new CalendarPopup(_value, AllowClear);
+                popup.DayChosen += date =>
+                {
+                    SetValue(date);
+                    popup.Close();
+                };
+                popup.Cleared += () =>
+                {
+                    SetValue(null);
+                    popup.Close();
+                };
+                popup.FormClosed += (_, _) =>
+                {
+                    if (ReferenceEquals(_popup, popup))
+                        _popup = null;
+
+                    if (!IsDisposed)
+                        Focus();
+                };
+
+                _popup = popup;
+                popup.Show(owner);
+                popup.PlaceBelow(this);
+                popup.Activate();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                g.Clear(Parent?.BackColor ?? BackColor);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                var scale = DeviceDpi / 96f;
+                var pad = (int)Math.Round(8 * scale);
+                var glyphSize = (int)Math.Round(16 * scale);
+                var clearSize = (int)Math.Round(18 * scale);
+
+                var glyphBounds = new Rectangle(
+                    Width - pad - glyphSize,
+                    (Height - glyphSize) / 2,
+                    glyphSize,
+                    glyphSize);
+
+                _clearBounds = AllowClear && _value is not null
+                    ? new Rectangle(
+                        glyphBounds.Left - pad - clearSize,
+                        (Height - clearSize) / 2,
+                        clearSize,
+                        clearSize)
+                    : Rectangle.Empty;
+
+                var textRight = (_clearBounds.IsEmpty ? glyphBounds.Left : _clearBounds.Left) - pad;
+                var textBounds = new Rectangle(pad, 0, Math.Max(10, textRight - pad), Height);
+                var text = _value is DateTime date
+                    ? date.ToString("ddd, d MMM yyyy")
+                    : "No delivery date";
+
+                TextRenderer.DrawText(
+                    g,
+                    text,
+                    Font,
+                    textBounds,
+                    _value is null ? Palette.TextSecondary.Color : Palette.TextPrimary.Color,
+                    TextFormatFlags.Left |
+                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine |
+                    TextFormatFlags.NoPrefix |
+                    TextFormatFlags.EndEllipsis);
+
+                // Calendar glyph: a rounded page with two rings and a header rule.
+                var glyphColor = _hover ? Palette.Primary.Color : Palette.TextSecondary.Color;
+                using (var pen = new Pen(glyphColor, MathF.Max(1f, 1.2f * scale))
+                {
+                    StartCap = LineCap.Round,
+                    EndCap = LineCap.Round
+                })
+                {
+                    var body = new Rectangle(
+                        glyphBounds.Left,
+                        glyphBounds.Top + (int)Math.Round(2 * scale),
+                        glyphBounds.Width,
+                        glyphBounds.Height - (int)Math.Round(2 * scale));
+                    using (var path = RoundedRectangle(body, (int)Math.Round(3 * scale)))
+                        g.DrawPath(pen, path);
+
+                    var ringTop = body.Top - (int)Math.Round(1 * scale);
+                    var ringBottom = body.Top + (int)Math.Round(4 * scale);
+                    g.DrawLine(pen, body.Left + body.Width / 3f, ringTop, body.Left + body.Width / 3f, ringBottom);
+                    g.DrawLine(pen, body.Right - body.Width / 3f, ringTop, body.Right - body.Width / 3f, ringBottom);
+                    var ruleY = body.Top + body.Height / 3f;
+                    g.DrawLine(pen, body.Left, ruleY, body.Right, ruleY);
+                }
+
+                if (!_clearBounds.IsEmpty)
+                {
+                    using var clearPen = new Pen(
+                        _hover ? Palette.TextPrimary.Color : Palette.TextSecondary.Color,
+                        MathF.Max(1f, 1.3f * scale))
+                    {
+                        StartCap = LineCap.Round,
+                        EndCap = LineCap.Round
+                    };
+                    var inset = _clearBounds.Width / 4f;
+                    g.DrawLine(clearPen,
+                        _clearBounds.Left + inset, _clearBounds.Top + inset,
+                        _clearBounds.Right - inset, _clearBounds.Bottom - inset);
+                    g.DrawLine(clearPen,
+                        _clearBounds.Right - inset, _clearBounds.Top + inset,
+                        _clearBounds.Left + inset, _clearBounds.Bottom - inset);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The month calendar that drops out of a DateField: Monday-first grid, ‹ › month steps,
+        /// today ringed, the chosen day filled, and Today / Clear date in the footer.
+        /// </summary>
+        private sealed class CalendarPopup : Form
+        {
+            private const int Pad = 12;
+            private const int CellWidth = 38;
+            private const int CellHeight = 30;
+            private const int HeaderHeight = 40;
+            private const int WeekdayHeight = 22;
+            private const int FooterHeight = 54;
+            private const int Columns = 7;
+            private const int Rows = 6;
+
+            private static readonly string[] WeekdayLabels = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+            private static readonly Font MonthFont = new("Segoe UI Semibold", 10F);
+            private static readonly Font WeekdayFont = new("Segoe UI Semibold", 7.5F);
+            private static readonly Font DayFont = new("Segoe UI", 9F);
+            private static readonly Font DayBoldFont = new("Segoe UI Semibold", 9F);
+            private static readonly Font LinkFont = new("Segoe UI Semibold", 9F);
+
+            private readonly DateTime? _selected;
+            private readonly bool _allowClear;
+
+            private DateTime _month;
+            private int _hoverIndex = -1;
+            private bool _activated;
+
+            private Rectangle _todayBounds;
+            private Rectangle _clearBounds;
+            private Rectangle _previousBounds;
+            private Rectangle _nextBounds;
+
+            public event Action<DateTime>? DayChosen;
+            public event Action? Cleared;
+
+            public CalendarPopup(DateTime? selected, bool allowClear)
+            {
+                _selected = selected?.Date;
+                _allowClear = allowClear;
+                var anchor = _selected ?? DateTime.Today;
+                _month = new DateTime(anchor.Year, anchor.Month, 1);
+
+                Theme.ThreadFlowTheme.Apply(this);
+
+                Text = "Choose a date";
+                BackColor = Palette.BackgroundSecondary.Color;
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual;
+                Font = DayFont;
+                KeyPreview = true;
+                DoubleBuffered = true;
+                ClientSize = new Size(
+                    Pad * 2 + CellWidth * Columns,
+                    Pad + HeaderHeight + WeekdayHeight + CellHeight * Rows + FooterHeight);
+
+                AutoScaleDimensions = new SizeF(96F, 96F);
+                AutoScaleMode = AutoScaleMode.Dpi;
+            }
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    var creation = base.CreateParams;
+                    creation.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW: no taskbar or Alt+Tab entry.
+                    creation.ClassStyle |= 0x00020000; // CS_DROPSHADOW
+                    return creation;
+                }
+            }
+
+            /// <summary>Opens under the field, flipping above it when there is no room below.</summary>
+            public void PlaceBelow(Control anchor)
+            {
+                var below = anchor.PointToScreen(new Point(0, anchor.Height + 2));
+                var screen = Screen.FromPoint(below).WorkingArea;
+
+                var y = below.Y;
+                if (y + Height > screen.Bottom)
+                {
+                    var above = anchor.PointToScreen(Point.Empty);
+                    y = above.Y - Height - 2;
+                }
+
+                var x = Math.Min(below.X, screen.Right - Width);
+                Location = new Point(Math.Max(screen.Left, x), Math.Max(screen.Top, y));
+            }
+
+            protected override void OnActivated(EventArgs e)
+            {
+                _activated = true;
+                base.OnActivated(e);
+            }
+
+            protected override void OnDeactivate(EventArgs e)
+            {
+                base.OnDeactivate(e);
+                // Only treat this as "the user clicked away" once the calendar actually had focus,
+                // so it cannot vanish in the moment it opens.
+                if (_activated)
+                    Close();
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Escape)
+                {
+                    Close();
+                    e.Handled = true;
+                }
+                else if (e.KeyCode == Keys.PageUp)
+                    ShiftMonth(-1);
+                else if (e.KeyCode == Keys.PageDown)
+                    ShiftMonth(1);
+
+                base.OnKeyDown(e);
+            }
+
+            private float DpiScale => DeviceDpi / 96f;
+            private int PadPixels => (int)Math.Round(Pad * DpiScale);
+            private int CellPixelsWide => (int)Math.Round(CellWidth * DpiScale);
+            private int CellPixelsHigh => (int)Math.Round(CellHeight * DpiScale);
+            private int GridTop => PadPixels + (int)Math.Round((HeaderHeight + WeekdayHeight) * DpiScale);
+            private int GridLeft => PadPixels;
+
+            private DateTime FirstCell => _month.AddDays(-(((int)_month.DayOfWeek + 6) % 7));
+
+            private Rectangle CellBounds(int index) => new(
+                GridLeft + index % Columns * CellPixelsWide,
+                GridTop + index / Columns * CellPixelsHigh,
+                CellPixelsWide,
+                CellPixelsHigh);
+
+            private int DayIndexAt(Point point)
+            {
+                for (var index = 0; index < Rows * Columns; index++)
+                {
+                    if (CellBounds(index).Contains(point))
+                        return index;
+                }
+
+                return -1;
+            }
+
+            private void ShiftMonth(int months)
+            {
+                _month = _month.AddMonths(months);
+                _hoverIndex = -1;
+                Invalidate();
+            }
+
+            private void Choose(DateTime date)
+            {
+                DayChosen?.Invoke(date.Date);
+                Close();
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                var index = DayIndexAt(e.Location);
+                if (index != _hoverIndex)
+                {
+                    _hoverIndex = index;
+                    Invalidate();
+                }
+
+                var overAction = _previousBounds.Contains(e.Location) ||
+                    _nextBounds.Contains(e.Location) ||
+                    _todayBounds.Contains(e.Location) ||
+                    (!_clearBounds.IsEmpty && _clearBounds.Contains(e.Location));
+                Cursor = overAction || index >= 0 ? Cursors.Hand : Cursors.Default;
+                base.OnMouseMove(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                _hoverIndex = -1;
+                Invalidate();
+                base.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                base.OnMouseUp(e);
+                if (e.Button != MouseButtons.Left)
+                    return;
+
+                if (_previousBounds.Contains(e.Location))
+                {
+                    ShiftMonth(-1);
+                    return;
+                }
+
+                if (_nextBounds.Contains(e.Location))
+                {
+                    ShiftMonth(1);
+                    return;
+                }
+
+                if (!_clearBounds.IsEmpty && _clearBounds.Contains(e.Location))
+                {
+                    Cleared?.Invoke();
+                    return;
+                }
+
+                if (_todayBounds.Contains(e.Location))
+                {
+                    Choose(DateTime.Today);
+                    return;
+                }
+
+                var index = DayIndexAt(e.Location);
+                if (index >= 0)
+                    Choose(FirstCell.AddDays(index));
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                g.Clear(BackColor);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                var scale = DpiScale;
+                var pad = PadPixels;
+
+                using (var border = new Pen(BrandTints.powderBlue.Color, 1f))
+                    g.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+
+                // Month caption and the ‹ › steps.
+                var headerHeight = (int)Math.Round(HeaderHeight * scale);
+                var step = (int)Math.Round(26 * scale);
+                var stepTop = pad + (headerHeight - step) / 2;
+                _nextBounds = new Rectangle(ClientSize.Width - pad - step, stepTop, step, step);
+                _previousBounds = new Rectangle(_nextBounds.Left - step - (int)Math.Round(8 * scale), stepTop, step, step);
+
+                TextRenderer.DrawText(
+                    g,
+                    _month.ToString("MMMM yyyy"),
+                    MonthFont,
+                    new Rectangle(pad, pad, _previousBounds.Left - pad, headerHeight),
+                    Palette.TextPrimary.Color,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+
+                PaintChevron(g, _previousBounds, pointsLeft: true);
+                PaintChevron(g, _nextBounds, pointsLeft: false);
+
+                // Weekday captions.
+                var weekdayTop = pad + headerHeight;
+                var weekdayHeight = (int)Math.Round(WeekdayHeight * scale);
+                for (var column = 0; column < Columns; column++)
+                {
+                    var bounds = new Rectangle(
+                        GridLeft + column * CellPixelsWide,
+                        weekdayTop,
+                        CellPixelsWide,
+                        weekdayHeight);
+                    TextRenderer.DrawText(
+                        g,
+                        WeekdayLabels[column],
+                        WeekdayFont,
+                        bounds,
+                        Palette.TextSecondary.Color,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                }
+
+                // Days.
+                var diameter = (int)Math.Round(26 * scale);
+                var first = FirstCell;
+                for (var index = 0; index < Rows * Columns; index++)
+                {
+                    var date = first.AddDays(index);
+                    var cell = CellBounds(index);
+                    var inMonth = date.Month == _month.Month && date.Year == _month.Year;
+                    var selected = _selected == date.Date;
+                    var today = date == DateTime.Today;
+                    var circle = new Rectangle(
+                        cell.X + (cell.Width - diameter) / 2,
+                        cell.Y + (cell.Height - diameter) / 2,
+                        diameter,
+                        diameter);
+
+                    if (selected)
+                    {
+                        using var fill = new SolidBrush(Palette.Primary.Color);
+                        g.FillEllipse(fill, circle);
+                    }
+                    else if (index == _hoverIndex)
+                    {
+                        using var fill = new SolidBrush(BrandTints.iceBlue.Color);
+                        g.FillEllipse(fill, circle);
+                    }
+                    else if (today)
+                    {
+                        using var ring = new Pen(Palette.Primary.Color, 1f);
+                        g.DrawEllipse(ring, circle);
+                    }
+
+                    var color = selected ? Palette.BackgroundSecondary.Color
+                        : inMonth ? Palette.TextPrimary.Color
+                        : Palette.TextSecondary.Color;
+                    TextRenderer.DrawText(
+                        g,
+                        date.Day.ToString(),
+                        today && !selected ? DayBoldFont : DayFont,
+                        cell,
+                        color,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                }
+
+                // Footer: divider, Today, and (for optional dates) Clear date.
+                var gridBottom = GridTop + Rows * CellPixelsHigh;
+                using (var divider = new Pen(TableHeaderLineColor, 1f))
+                    g.DrawLine(divider, pad, gridBottom + (int)Math.Round(6 * scale), ClientSize.Width - pad, gridBottom + (int)Math.Round(6 * scale));
+
+                var footerHeight = (int)Math.Round(30 * scale);
+                var footerTop = gridBottom + (int)Math.Round(10 * scale);
+                _todayBounds = PaintLink(g, "Today", pad, footerTop, footerHeight, rightAlign: false);
+                _clearBounds = _allowClear
+                    ? PaintLink(g, "Clear date", ClientSize.Width - pad, footerTop, footerHeight, rightAlign: true)
+                    : Rectangle.Empty;
+            }
+
+            private Rectangle PaintLink(Graphics g, string text, int x, int top, int height, bool rightAlign)
+            {
+                var size = TextRenderer.MeasureText(
+                    g,
+                    text,
+                    LinkFont,
+                    new Size(int.MaxValue, int.MaxValue),
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                var bounds = new Rectangle(
+                    rightAlign ? x - size.Width : x,
+                    top,
+                    size.Width,
+                    Math.Max(height, size.Height));
+
+                TextRenderer.DrawText(
+                    g,
+                    text,
+                    LinkFont,
+                    bounds,
+                    Palette.Primary.Color,
+                    TextFormatFlags.Left |
+                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine |
+                    TextFormatFlags.NoPrefix |
+                    TextFormatFlags.NoClipping);
+
+                return bounds;
+            }
+
+            private void PaintChevron(Graphics g, Rectangle bounds, bool pointsLeft)
+            {
+                var scale = DpiScale;
+                using var pen = new Pen(Palette.TextSecondary.Color, MathF.Max(1f, 1.4f * scale))
+                {
+                    StartCap = LineCap.Round,
+                    EndCap = LineCap.Round,
+                    LineJoin = LineJoin.Round
+                };
+
+                var cx = bounds.Left + bounds.Width / 2f;
+                var cy = bounds.Top + bounds.Height / 2f;
+                var half = 3.5f * scale;
+                var direction = pointsLeft ? -1f : 1f;
+
+                g.DrawLines(pen, [
+                    new PointF(cx - direction * half / 2f, cy - half),
+                    new PointF(cx + direction * half / 2f, cy),
+                    new PointF(cx - direction * half / 2f, cy + half)
+                ]);
+            }
+        }
+
+        /// <summary>
         /// A borderless dialog in the same style as the invitation dialog in Platform Admin: blue
         /// header, title, fields, and Cancel / Save buttons. Save runs the supplied action; if it
         /// returns an error message the dialog stays open and shows it, so nothing typed is lost.
@@ -2249,6 +4339,7 @@ namespace ThreadFlow.WinForms
             private readonly Label _error = new();
             private readonly RoundedButton _save;
             private readonly RoundedButton _cancel;
+            private readonly Panel? _bodyScroll;
 
             public EditorDialog(
                 string headerText,
@@ -2269,6 +4360,15 @@ namespace ThreadFlow.WinForms
                 const int left = 24;
                 var innerWidth = DialogWidth - left * 2;
                 var bodyTop = 104 + DialogHeaderHeight;
+
+                // Keep the whole dialog on screen: a tall body would otherwise push the
+                // Cancel / Save buttons past the bottom of the working area.
+                var availableHeight = AvailableClientHeight();
+                var fixedHeight = bodyTop + 4 + ErrorHeight + 4 + ButtonHeight + 24;
+                var requestedBodyHeight = bodyHeight;
+                if (fixedHeight + bodyHeight > availableHeight)
+                    bodyHeight = Math.Max(200, availableHeight - fixedHeight);
+
                 var errorTop = bodyTop + bodyHeight + 4;
                 var buttonTop = errorTop + ErrorHeight + 4;
 
@@ -2347,8 +4447,32 @@ namespace ThreadFlow.WinForms
                     Size = new Size(innerWidth, 1)
                 };
 
-                body.Location = new Point(left, bodyTop);
-                body.Size = new Size(innerWidth, bodyHeight);
+                Control bodySlot;
+                if (bodyHeight < requestedBodyHeight)
+                {
+                    // The screen is too short for the full body: keep the dialog on screen and
+                    // let the content scroll, so the buttons stay visible and no field is lost.
+                    var scroll = new Panel
+                    {
+                        BackColor = Palette.BackgroundSecondary.Color,
+                        Location = new Point(left, bodyTop),
+                        Size = new Size(innerWidth, bodyHeight),
+                        AutoScroll = true
+                    };
+                    body.Location = Point.Empty;
+                    body.Size = new Size(
+                        innerWidth - SystemInformation.VerticalScrollBarWidth,
+                        requestedBodyHeight);
+                    scroll.Controls.Add(body);
+                    _bodyScroll = scroll;
+                    bodySlot = scroll;
+                }
+                else
+                {
+                    body.Location = new Point(left, bodyTop);
+                    body.Size = new Size(innerWidth, bodyHeight);
+                    bodySlot = body;
+                }
 
                 _error.Font = SubtitleFont;
                 _error.ForeColor = ErrorTextColor;
@@ -2368,7 +4492,7 @@ namespace ThreadFlow.WinForms
                 _cancel.Size = new Size(110, ButtonHeight);
                 _cancel.DialogResult = DialogResult.Cancel;
 
-                Controls.AddRange([header, titleLabel, subtitleLabel, divider, body, _error, _save, _cancel]);
+                Controls.AddRange([header, titleLabel, subtitleLabel, divider, bodySlot, _error, _save, _cancel]);
 
                 AutoScaleDimensions = new SizeF(96F, 96F);
                 AutoScaleMode = AutoScaleMode.Dpi;
@@ -2388,7 +4512,31 @@ namespace ThreadFlow.WinForms
                         if (input is TextBox textBox)
                             textBox.SelectAll();
                     }
+
+                    // Focusing the first input makes the scrolling body reveal it, which can leave
+                    // the top captions scrolled out of sight. Always open at the top.
+                    if (_bodyScroll is not null)
+                    {
+                        _bodyScroll.AutoScrollPosition = Point.Empty;
+                        BeginInvoke(new Action(() =>
+                        {
+                            if (!IsDisposed && _bodyScroll is { IsDisposed: false })
+                                _bodyScroll.AutoScrollPosition = Point.Empty;
+                        }));
+                    }
                 };
+            }
+
+            /// <summary>
+            /// The tallest client height that still fits on the screen, expressed in the
+            /// 96-DPI units this dialog's layout is written in.
+            /// </summary>
+            private int AvailableClientHeight()
+            {
+                var workArea = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.WorkingArea;
+                var dpi = DeviceDpi > 0 ? DeviceDpi : 96;
+                var logical = (int)Math.Round(workArea.Height * 96f / dpi);
+                return Math.Max(320, logical - 48);
             }
 
             private static Control? FindFirstInput(Control parent)
@@ -2820,6 +4968,47 @@ namespace ThreadFlow.WinForms
                             break;
                         }
 
+                    case NavIcon.Orders:
+                        {
+                            // Purchase order: a sheet with lines and a stamp.
+                            var u = bounds.Width / 18f;
+                            var x0 = bounds.X;
+                            var y0 = bounds.Y;
+                            g.DrawRectangle(pen, x0 + 3f * u, y0 + 1.5f * u, 12f * u, 15f * u);
+                            for (var i = 0; i < 3; i++)
+                            {
+                                var lineY = y0 + (5f + i * 3.2f) * u;
+                                g.DrawLine(pen, x0 + 5.5f * u, lineY, x0 + (i == 2 ? 9f : 12.5f) * u, lineY);
+                            }
+                            break;
+                        }
+
+                    case NavIcon.StockControl:
+                        {
+                            // Stacked stock shelves.
+                            var u = bounds.Width / 18f;
+                            var x0 = bounds.X;
+                            var y0 = bounds.Y;
+                            for (var i = 0; i < 3; i++)
+                            {
+                                var shelfTop = y0 + (2f + i * 5f) * u;
+                                g.DrawRectangle(pen, x0 + 2f * u, shelfTop, 14f * u, 3.6f * u);
+                            }
+                            break;
+                        }
+
+                    case NavIcon.StockHistory:
+                        {
+                            // Clock face with hands: the record of past movements.
+                            var u = bounds.Width / 18f;
+                            var x0 = bounds.X;
+                            var y0 = bounds.Y;
+                            g.DrawEllipse(pen, x0 + 2.5f * u, y0 + 2.5f * u, 13f * u, 13f * u);
+                            g.DrawLine(pen, cx, cy, cx, cy - 4f * u);
+                            g.DrawLine(pen, cx, cy, cx + 3.5f * u, cy + 1.5f * u);
+                            break;
+                        }
+
                     case NavIcon.LogOut:
                         {
                             // Open door bracket with an arrow leaving it.
@@ -2898,6 +5087,7 @@ namespace ThreadFlow.WinForms
             private bool _hover;
 
             // White by default (for the blue header bars); light headers can set a dark colour.
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
             public Color GlyphColor { get; set; } = Color.White;
 
             public CaptionButton(CaptionGlyph glyph)
@@ -3319,6 +5509,7 @@ namespace ThreadFlow.WinForms
                     true);
             }
 
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
             public string? BranchName
             {
                 get => _branchName;
@@ -3853,6 +6044,51 @@ namespace ThreadFlow.WinForms.ApiClient
                 "api/inventory/suppliers", cancellationToken) ?? [];
         }
 
+        public async Task<List<InventoryBranchDto>> GetTransferDestinationsAsync(CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventoryBranchDto>>("api/inventory/transfer-destinations", cancellationToken) ?? [];
+        }
+
+        public async Task<List<InventoryPurchaseOrderDto>> GetPurchaseOrdersAsync(Guid branchId, CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventoryPurchaseOrderDto>>($"api/inventory/purchase-orders?branchId={branchId}", cancellationToken) ?? [];
+        }
+
+        public Task<InventoryPurchaseOrderDto> SavePurchaseOrderAsync(Guid? id, SavePurchaseOrderRequest request, CancellationToken cancellationToken = default) =>
+            SendAsync<InventoryPurchaseOrderDto>(() => id is Guid orderId
+                ? Http.PutAsJsonAsync($"api/inventory/purchase-orders/{orderId}", request, cancellationToken)
+                : Http.PostAsJsonAsync("api/inventory/purchase-orders", request, cancellationToken), cancellationToken);
+
+        public Task PlacePurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsync($"api/inventory/purchase-orders/{id}/place", null, cancellationToken), cancellationToken);
+        public Task CancelPurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsync($"api/inventory/purchase-orders/{id}/cancel", null, cancellationToken), cancellationToken);
+        public Task<InventoryPurchaseOrderDto> ReceivePurchaseOrderAsync(Guid id, ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default) =>
+            SendAsync<InventoryPurchaseOrderDto>(() => Http.PostAsJsonAsync($"api/inventory/purchase-orders/{id}/receive", request, cancellationToken), cancellationToken);
+
+        public async Task<List<InventoryLowStockDto>> GetLowStockAsync(Guid branchId, CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventoryLowStockDto>>($"api/inventory/low-stock?branchId={branchId}", cancellationToken) ?? [];
+        }
+        public Task SetReorderLevelAsync(Guid branchId, Guid productId, int level, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PutAsJsonAsync($"api/inventory/stock/{branchId}/{productId}/reorder-level", new SetInventoryReorderLevelRequest(level), cancellationToken), cancellationToken);
+        public Task AdjustStockAsync(AdjustInventoryStockRequest request, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsJsonAsync("api/inventory/stock/adjustments", request, cancellationToken), cancellationToken);
+        public Task RecordStockCountAsync(RecordInventoryStockCountRequest request, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsJsonAsync("api/inventory/stock/counts", request, cancellationToken), cancellationToken);
+        public Task ReturnStockAsync(ReturnInventoryStockRequest request, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsJsonAsync("api/inventory/stock/returns", request, cancellationToken), cancellationToken);
+        public Task TransferStockAsync(TransferInventoryStockRequest request, CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PostAsJsonAsync("api/inventory/stock/transfers", request, cancellationToken), cancellationToken);
+        public async Task<List<InventoryStockMovementDto>> GetMovementsAsync(Guid branchId, CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventoryStockMovementDto>>($"api/inventory/stock/movements?branchId={branchId}", cancellationToken) ?? [];
+        }
+
         public Task<InventoryProductDto> SaveProductAsync(
             Guid? id, SaveInventoryProductRequest request, CancellationToken cancellationToken = default) =>
             SendAsync<InventoryProductDto>(
@@ -3903,7 +6139,7 @@ namespace ThreadFlow.WinForms.ApiClient
 
     public sealed record InventoryProductDto(
         Guid Id, string Sku, string Name, string Color, string Size,
-        decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, bool IsActive);
+        decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive);
 
     public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
 
@@ -3924,4 +6160,18 @@ namespace ThreadFlow.WinForms.ApiClient
         string Name, string? ContactName, string? Email, string? Phone, string? Address);
 
     public sealed record SetCatalogStatusRequest(bool IsActive);
+
+    public sealed record InventoryPurchaseOrderLineDto(Guid Id, Guid ProductId, string Sku, string ProductName, int QuantityOrdered, int QuantityReceived, decimal UnitCost);
+    public sealed record InventoryPurchaseOrderDto(Guid Id, string Number, Guid BranchId, Guid SupplierId, string SupplierName, string Status, DateTime CreatedAtUtc, DateTime? ExpectedAtUtc, DateTime? OrderedAtUtc, string Notes, IReadOnlyList<InventoryPurchaseOrderLineDto> Lines);
+    public sealed record SavePurchaseOrderLineRequest(Guid ProductId, int Quantity, decimal UnitCost);
+    public sealed record SavePurchaseOrderRequest(Guid BranchId, Guid SupplierId, DateTime? ExpectedAtUtc, string? Notes, List<SavePurchaseOrderLineRequest> Lines);
+    public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, int Quantity);
+    public sealed record ReceivePurchaseOrderRequest(string? Reference, List<ReceivePurchaseOrderLineRequest> Lines);
+    public sealed record InventoryLowStockDto(Guid ProductId, string Sku, string ProductName, int QuantityOnHand, int ReorderLevel);
+    public sealed record SetInventoryReorderLevelRequest(int ReorderLevel);
+    public sealed record AdjustInventoryStockRequest(Guid BranchId, Guid ProductId, int QuantityChange, string Reason, string? Reference);
+    public sealed record RecordInventoryStockCountRequest(Guid BranchId, Guid ProductId, int CountedQuantity, string? Reference, string? Notes);
+    public sealed record ReturnInventoryStockRequest(Guid BranchId, Guid ProductId, Guid SupplierId, int Quantity, string Reason, string? Reference);
+    public sealed record TransferInventoryStockRequest(Guid FromBranchId, Guid ToBranchId, Guid ProductId, int Quantity, string? Reference, string? Notes);
+    public sealed record InventoryStockMovementDto(Guid Id, string Type, string Sku, string ProductName, string BranchName, string? DestinationBranchName, int Quantity, int QuantityChange, string Reference, string Notes, DateTime OccurredAtUtc);
 }

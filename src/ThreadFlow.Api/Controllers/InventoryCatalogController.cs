@@ -75,6 +75,10 @@ public sealed class InventoryCatalogController(
                     .Where(stock => stock.BranchId == branchId && stock.ProductId == product.Id)
                     .Select(stock => (int?)stock.QuantityOnHand)
                     .FirstOrDefault() ?? 0,
+                tenantDb.BranchProductStocks.AsNoTracking()
+                    .Where(stock => stock.BranchId == branchId && stock.ProductId == product.Id)
+                    .Select(stock => (int?)stock.ReorderLevel)
+                    .FirstOrDefault() ?? 0,
                 product.IsActive))
             .ToListAsync(cancellationToken);
 
@@ -174,6 +178,19 @@ public sealed class InventoryCatalogController(
             ReceivedAtUtc = DateTime.UtcNow
         };
         tenantDb.InventoryStockReceipts.Add(receipt);
+        tenantDb.InventoryStockMovements.Add(new InventoryStockMovement
+        {
+            Type = "Stock receipt",
+            BranchId = request.BranchId,
+            ProductId = request.ProductId,
+            SupplierId = request.SupplierId,
+            Quantity = request.Quantity,
+            QuantityChange = request.Quantity,
+            Reference = receipt.Reference,
+            Notes = "Stock received outside a purchase order.",
+            PerformedByUserId = receipt.ReceivedByUserId,
+            OccurredAtUtc = receipt.ReceivedAtUtc
+        });
         await tenantDb.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -421,7 +438,7 @@ public sealed class InventoryCatalogController(
 
     private static InventoryProductDto ToDto(Product product, string? supplierName) => new(
         product.Id, product.Sku, product.Name, product.Color, product.Size,
-        product.UnitPrice, product.SupplierId, supplierName, 0, product.IsActive);
+        product.UnitPrice, product.SupplierId, supplierName, 0, 0, product.IsActive);
 
     private static InventorySupplierDto ToDto(Supplier supplier) => new(
         supplier.Id, supplier.Name, supplier.ContactName, supplier.Email,
@@ -430,7 +447,7 @@ public sealed class InventoryCatalogController(
 
 public sealed record InventoryProductDto(
     Guid Id, string Sku, string Name, string Color, string Size,
-    decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, bool IsActive);
+    decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive);
 
 public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
 
