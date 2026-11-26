@@ -4,6 +4,9 @@ using System.Runtime.InteropServices;
 using ThreadFlow.WinForms.ApiClient;
 using ThreadFlow.WinForms.Theme.Colors;
 
+using ConfirmDialog = ThreadFlow.WinForms.Theme.ConfirmDialog;
+using MessageBox = ThreadFlow.WinForms.Theme.AppMessageBox;
+
 namespace ThreadFlow.WinForms;
 
 /// <summary>
@@ -831,6 +834,9 @@ public sealed class TenantOwnerManagerForm : Form
 
     private void StyleGrid(DataGridView grid)
     {
+        // No row is highlighted until one is clicked, and clicking away drops it.
+        Theme.GridSelection.Enable(grid);
+
         grid.BackgroundColor = Palette.BackgroundSecondary.Color;
         grid.BorderStyle = BorderStyle.None;
         grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
@@ -1402,124 +1408,6 @@ public sealed class TenantOwnerManagerForm : Form
         _branchName.Clear();
         _toggleBranchStatus.Enabled = false;
         _branchesStatus.Text = "Enter a unique code and name for the new branch.";
-    }
-
-    /// <summary>
-    /// A small borderless confirmation prompt: light header with a close button, title, one
-    /// line of text, Cancel and confirm buttons. Returns DialogResult.OK when confirmed;
-    /// Cancel, the close button or Esc all return Cancel.
-    /// </summary>
-    private sealed class ConfirmDialog : Form
-    {
-        private const int DialogWidth = 340;
-        private const int DialogHeight = 160;
-        private const int DialogHeaderHeight = 32;
-        private const int DialogButtonHeight = 36;
-
-        private static readonly Color HeaderBackColor = Color.FromArgb(238, 241, 248);
-
-        public ConfirmDialog(string headerText, string title, string message, string confirmText, string cancelText = "Cancel")
-        {
-            Theme.ThreadFlowTheme.Apply(this);
-
-            SuspendLayout();
-
-            const int pad = 20;
-            var innerWidth = DialogWidth - pad * 2;
-
-            Text = headerText;
-            BackColor = Palette.BackgroundSecondary.Color;
-            ClientSize = new Size(DialogWidth, DialogHeight);
-            StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-
-            var header = new Panel
-            {
-                BackColor = HeaderBackColor,
-                Location = Point.Empty,
-                Size = new Size(DialogWidth, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            var headerTitle = new Label
-            {
-                Text = headerText,
-                Font = SubtitleFont,
-                ForeColor = Palette.TextPrimary.Color,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(12, 0),
-                Size = new Size(DialogWidth - 12 - 40, DialogHeaderHeight)
-            };
-            var closeHeader = new CaptionButton(CaptionGlyph.Close)
-            {
-                GlyphColor = Palette.TextPrimary.Color,
-                Location = new Point(DialogWidth - 40, 0),
-                Size = new Size(40, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            closeHeader.Click += (_, _) => DialogResult = DialogResult.Cancel;
-
-            void BeginHeaderDrag(object? sender, MouseEventArgs e)
-            {
-                if (e.Button != MouseButtons.Left || e.Clicks != 1)
-                    return;
-
-                ReleaseCapture();
-                _ = SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
-            }
-
-            header.MouseDown += BeginHeaderDrag;
-            headerTitle.MouseDown += BeginHeaderDrag;
-            header.Controls.Add(headerTitle);
-            header.Controls.Add(closeHeader);
-
-            var titleLabel = new Label
-            {
-                Text = title,
-                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
-                ForeColor = Palette.TextPrimary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(pad, DialogHeaderHeight + 14),
-                Size = new Size(innerWidth, 26)
-            };
-            var messageLabel = new Label
-            {
-                Text = message,
-                Font = SubtitleFont,
-                ForeColor = Palette.TextSecondary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.TopLeft,
-                Location = new Point(pad, DialogHeaderHeight + 42),
-                Size = new Size(innerWidth, 20)
-            };
-
-            var buttonTop = DialogHeight - pad + 2 - DialogButtonHeight;
-
-            var confirm = MakePrimaryButton(confirmText);
-            confirm.Size = new Size(96, DialogButtonHeight);
-            confirm.Location = new Point(DialogWidth - pad - confirm.Width, buttonTop);
-            confirm.DialogResult = DialogResult.OK;
-
-            var cancel = MakeSecondaryButton(cancelText);
-            cancel.Size = new Size(88, DialogButtonHeight);
-            cancel.Location = new Point(confirm.Left - 10 - cancel.Width, buttonTop);
-            cancel.DialogResult = DialogResult.Cancel;
-
-            Controls.AddRange([header, titleLabel, messageLabel, confirm, cancel]);
-
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-
-            ResumeLayout(false);
-            PerformLayout();
-
-            AcceptButton = confirm;
-            CancelButton = cancel;
-        }
     }
 
     // ---- Control factories (same as the platform admin screen) ----

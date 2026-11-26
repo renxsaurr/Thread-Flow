@@ -17,6 +17,7 @@ public sealed class TenantDbContext(DbContextOptions<TenantDbContext> options) :
     public DbSet<SaleLine> SaleLines => Set<SaleLine>();
     public DbSet<BranchProductStock> BranchProductStocks => Set<BranchProductStock>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<SupplierProduct> SupplierProducts => Set<SupplierProduct>();
     public DbSet<InventoryStockReceipt> InventoryStockReceipts => Set<InventoryStockReceipt>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -84,6 +85,19 @@ public sealed class TenantDbContext(DbContextOptions<TenantDbContext> options) :
             entity.Property(x => x.Phone).HasMaxLength(32).IsRequired();
             entity.Property(x => x.Address).HasMaxLength(300).IsRequired();
             entity.HasIndex(x => x.Name);
+        });
+
+        modelBuilder.Entity<SupplierProduct>(entity =>
+        {
+            entity.ToTable("SupplierProducts");
+            entity.HasKey(x => new { x.SupplierId, x.ProductId });
+            entity.Property(x => x.UnitCost).HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).IsRequired();
+            entity.HasOne<Supplier>().WithMany().HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ProductId);
         });
 
         modelBuilder.Entity<Sale>(entity =>

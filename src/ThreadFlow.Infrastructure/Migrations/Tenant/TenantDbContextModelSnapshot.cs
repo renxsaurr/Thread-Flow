@@ -342,6 +342,28 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.ToTable("Suppliers", (string)null);
                 });
 
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.SupplierProduct", b =>
+                {
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("SupplierId", "ProductId");
+
+                    b.HasIndex("ProductId");
+
+                    b.ToTable("SupplierProducts", (string)null);
+                });
+
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Management.Branch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -610,6 +632,21 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.HasOne("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", null)
                         .WithMany("Lines")
                         .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.SupplierProduct", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Inventory.Supplier", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -4,6 +4,9 @@ using System.Runtime.InteropServices;
 using ThreadFlow.WinForms.ApiClient;
 using ThreadFlow.WinForms.Theme.Colors;
 
+using ConfirmDialog = ThreadFlow.WinForms.Theme.ConfirmDialog;
+using MessageBox = ThreadFlow.WinForms.Theme.AppMessageBox;
+
 namespace ThreadFlow.WinForms;
 
 public sealed class PlatformAdminForm : Form
@@ -23,6 +26,7 @@ public sealed class PlatformAdminForm : Form
     private static readonly Shades BrandShades = new();
     private static readonly Tints BrandTints = new();
     private static readonly Color NavIconColor = Color.FromArgb(75, 85, 99);
+
 
     // Docker Desktop-style sidebar: light gray panel, inset pale-blue selection bar.
     private static readonly Color SidebarBackColor = Color.FromArgb(246, 247, 250);
@@ -581,6 +585,9 @@ public sealed class PlatformAdminForm : Form
 
     private void StyleGrid(DataGridView grid)
     {
+        // No row is highlighted until one is clicked, and clicking away drops it.
+        Theme.GridSelection.Enable(grid);
+
         grid.BackgroundColor = Palette.BackgroundSecondary.Color;
         grid.BorderStyle = BorderStyle.None;
         grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
@@ -886,124 +893,6 @@ public sealed class PlatformAdminForm : Form
         }
     }
 
-    /// <summary>
-    /// A small borderless confirmation prompt: light header with a close button, title, one
-    /// line of text, Cancel and confirm buttons. Returns DialogResult.OK when confirmed;
-    /// Cancel, the close button or Esc all return Cancel.
-    /// </summary>
-    private sealed class ConfirmDialog : Form
-    {
-        private const int DialogWidth = 340;
-        private const int DialogHeight = 160;
-        private const int DialogHeaderHeight = 32;
-        private const int DialogButtonHeight = 36;
-
-        private static readonly Color HeaderBackColor = Color.FromArgb(238, 241, 248);
-
-        public ConfirmDialog(string headerText, string title, string message, string confirmText, string cancelText = "Cancel")
-        {
-            Theme.ThreadFlowTheme.Apply(this);
-
-            SuspendLayout();
-
-            const int pad = 20;
-            var innerWidth = DialogWidth - pad * 2;
-
-            Text = headerText;
-            BackColor = Palette.BackgroundSecondary.Color;
-            ClientSize = new Size(DialogWidth, DialogHeight);
-            StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-
-            var header = new Panel
-            {
-                BackColor = HeaderBackColor,
-                Location = Point.Empty,
-                Size = new Size(DialogWidth, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            var headerTitle = new Label
-            {
-                Text = headerText,
-                Font = SubtitleFont,
-                ForeColor = Palette.TextPrimary.Color,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(12, 0),
-                Size = new Size(DialogWidth - 12 - 40, DialogHeaderHeight)
-            };
-            var closeHeader = new CaptionButton(CaptionGlyph.Close)
-            {
-                GlyphColor = Palette.TextPrimary.Color,
-                Location = new Point(DialogWidth - 40, 0),
-                Size = new Size(40, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            closeHeader.Click += (_, _) => DialogResult = DialogResult.Cancel;
-
-            void BeginHeaderDrag(object? sender, MouseEventArgs e)
-            {
-                if (e.Button != MouseButtons.Left || e.Clicks != 1)
-                    return;
-
-                ReleaseCapture();
-                _ = SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
-            }
-
-            header.MouseDown += BeginHeaderDrag;
-            headerTitle.MouseDown += BeginHeaderDrag;
-            header.Controls.Add(headerTitle);
-            header.Controls.Add(closeHeader);
-
-            var titleLabel = new Label
-            {
-                Text = title,
-                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
-                ForeColor = Palette.TextPrimary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(pad, DialogHeaderHeight + 14),
-                Size = new Size(innerWidth, 26)
-            };
-            var messageLabel = new Label
-            {
-                Text = message,
-                Font = SubtitleFont,
-                ForeColor = Palette.TextSecondary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.TopLeft,
-                Location = new Point(pad, DialogHeaderHeight + 42),
-                Size = new Size(innerWidth, 20)
-            };
-
-            var buttonTop = DialogHeight - pad + 2 - DialogButtonHeight;
-
-            var confirm = MakePrimaryButton(confirmText);
-            confirm.Size = new Size(96, DialogButtonHeight);
-            confirm.Location = new Point(DialogWidth - pad - confirm.Width, buttonTop);
-            confirm.DialogResult = DialogResult.OK;
-
-            var cancel = MakeSecondaryButton(cancelText);
-            cancel.Size = new Size(88, DialogButtonHeight);
-            cancel.Location = new Point(confirm.Left - 10 - cancel.Width, buttonTop);
-            cancel.DialogResult = DialogResult.Cancel;
-
-            Controls.AddRange([header, titleLabel, messageLabel, confirm, cancel]);
-
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-
-            ResumeLayout(false);
-            PerformLayout();
-
-            AcceptButton = confirm;
-            CancelButton = cancel;
-        }
-    }
-
     private void LogOut()
     {
         using (var confirm = new ConfirmDialog(
@@ -1225,88 +1114,29 @@ public sealed class PlatformAdminForm : Form
 
     private sealed class InvitationHandoffDialog : Form
     {
-        private const int DialogHeaderHeight = 40;
+        private const int DialogWidth = 640;
+        private const int DetailsHeight = 258;
 
         public InvitationHandoffDialog(CompanyApplicationApprovedDto invitation)
         {
             Theme.ThreadFlowTheme.Apply(this);
+            Theme.DialogChrome.Prepare(this);
 
             SuspendLayout();
 
+            var pad = Theme.DialogChrome.Pad;
+            var detailsTop = Theme.DialogChrome.HeaderHeight + 20;
+            var buttonTop = detailsTop + DetailsHeight + 8 + 16;
+
             Text = "Invitation created";
-            BackColor = Palette.BackgroundSecondary.Color;
-            ClientSize = new Size(640, 440 + DialogHeaderHeight);
-            StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
+            ClientSize = new Size(DialogWidth, buttonTop + ButtonHeight + pad);
 
-            var header = new Panel
-            {
-                BackColor = Palette.Primary.Color,
-                Location = Point.Empty,
-                Size = new Size(640, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            var headerTitle = new Label
-            {
-                Text = Text,
-                Font = TopBarBrandFont,
-                ForeColor = Color.White,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(18, 0),
-                Size = new Size(540, DialogHeaderHeight)
-            };
-            var closeHeader = new CaptionButton(CaptionGlyph.Close)
-            {
-                Location = new Point(594, 0),
-                Size = new Size(46, DialogHeaderHeight),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            closeHeader.Click += (_, _) => Close();
+            var header = Theme.DialogChrome.CreateHeader(
+                this,
+                "Invitation created",
+                "Share these details privately with the company's Tenant Admin.",
+                DialogWidth);
 
-            void BeginHeaderDrag(object? sender, MouseEventArgs e)
-            {
-                if (e.Button != MouseButtons.Left || e.Clicks != 1)
-                    return;
-
-                ReleaseCapture();
-                _ = SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
-            }
-
-            header.MouseDown += BeginHeaderDrag;
-            headerTitle.MouseDown += BeginHeaderDrag;
-            header.Controls.Add(headerTitle);
-            header.Controls.Add(closeHeader);
-
-            var title = new Label
-            {
-                Text = "Invitation created",
-                Font = TitleFont,
-                ForeColor = Palette.TextPrimary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(24, 20 + DialogHeaderHeight),
-                Size = new Size(592, 34)
-            };
-            var subtitle = new Label
-            {
-                Text = "Share these details privately with the company's Tenant Admin.",
-                Font = SubtitleFont,
-                ForeColor = Palette.TextSecondary.Color,
-                BackColor = Color.Transparent,
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(24, 56 + DialogHeaderHeight),
-                Size = new Size(592, 20)
-            };
-            var divider = new Panel
-            {
-                BackColor = BrandTints.iceBlue.Color,
-                Location = new Point(24, 88 + DialogHeaderHeight),
-                Size = new Size(592, 1)
-            };
             var detailsBox = new TextBox
             {
                 Text = BuildHandoffDetails(invitation),
@@ -1322,12 +1152,14 @@ public sealed class PlatformAdminForm : Form
             };
             var detailsFrame = new HandoffDetailsFrame(detailsBox)
             {
-                Location = new Point(24, 104 + DialogHeaderHeight),
-                Size = new Size(592, 258)
+                Location = new Point(pad, detailsTop),
+                Size = new Size(DialogWidth - pad * 2, DetailsHeight)
             };
 
+            var footerDivider = Theme.DialogChrome.CreateDivider(DialogWidth, detailsTop + DetailsHeight + 8);
+
             var copy = MakeSecondaryButton("Copy details");
-            copy.Location = new Point(24, 378 + DialogHeaderHeight);
+            copy.Location = new Point(pad, buttonTop);
             copy.Size = new Size(150, ButtonHeight);
             copy.Click += (_, _) =>
             {
@@ -1338,17 +1170,21 @@ public sealed class PlatformAdminForm : Form
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(exception.Message, "Could not copy",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Theme.AppMessageBox.Show(
+                        this,
+                        exception.Message,
+                        "Could not copy",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                 }
             };
 
             var done = MakePrimaryButton("Done");
-            done.Location = new Point(466, 378 + DialogHeaderHeight);
+            done.Location = new Point(DialogWidth - pad - 150, buttonTop);
             done.Size = new Size(150, ButtonHeight);
             done.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange([header, title, subtitle, divider, detailsFrame, copy, done]);
+            Controls.AddRange([header, detailsFrame, footerDivider, copy, done]);
 
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;

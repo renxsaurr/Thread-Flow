@@ -56,13 +56,10 @@ public sealed class InventoryCatalogController(
         if (!await IsAllowedBranchAsync(branchId, cancellationToken))
             return Forbid();
 
-        var products = await (
-            from product in tenantDb.Products.AsNoTracking()
-            join supplier in tenantDb.Suppliers.AsNoTracking()
-                on product.SupplierId equals supplier.Id into supplierRows
-            from supplier in supplierRows.DefaultIfEmpty()
-            orderby product.Name, product.Sku
-            select new InventoryProductDto(
+        var products = await tenantDb.Products.AsNoTracking()
+            .OrderBy(product => product.Name)
+            .ThenBy(product => product.Sku)
+            .Select(product => new InventoryProductDto(
                 product.Id,
                 product.Sku,
                 product.Name,
@@ -70,7 +67,7 @@ public sealed class InventoryCatalogController(
                 product.Size,
                 product.UnitPrice,
                 product.SupplierId,
-                supplier == null ? null : supplier.Name,
+                null,
                 tenantDb.BranchProductStocks.AsNoTracking()
                     .Where(stock => stock.BranchId == branchId && stock.ProductId == product.Id)
                     .Select(stock => (int?)stock.QuantityOnHand)
@@ -82,7 +79,44 @@ public sealed class InventoryCatalogController(
                 product.IsActive))
             .ToListAsync(cancellationToken);
 
-        return Ok(products);
+        var productIds = products.Select(product => product.Id).ToArray();
+        var supplierNames = await (
+            from supplierProduct in tenantDb.SupplierProducts.AsNoTracking()
+            join supplier in tenantDb.Suppliers.AsNoTracking()
+                on supplierProduct.SupplierId equals supplier.Id
+            where productIds.Contains(supplierProduct.ProductId)
+            orderby supplier.Name
+            select new { supplierProduct.ProductId, supplier.Name })
+            .ToListAsync(cancellationToken);
+        var namesByProduct = supplierNames
+            .GroupBy(item => item.ProductId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var result = products.Select(product => product with
+        {
+            SupplierCount = namesByProduct.GetValueOrDefault(product.Id)
+        }).ToList();
+
+        return Ok(result);
+    }
+
+    [HttpGet("products/{productId:guid}/suppliers")]
+    public async Task<ActionResult<IReadOnlyList<InventoryProductSupplierOfferDto>>> GetProductSupplierOffers(
+        Guid productId, CancellationToken cancellationToken)
+    {
+        if (!await tenantDb.Products.AsNoTracking().AnyAsync(item => item.Id == productId, cancellationToken))
+            return NotFound(new { error = "Product was not found." });
+
+        var offers = await (
+            from supplierProduct in tenantDb.SupplierProducts.AsNoTracking()
+            join supplier in tenantDb.Suppliers.AsNoTracking()
+                on supplierProduct.SupplierId equals supplier.Id
+            where supplierProduct.ProductId == productId
+            orderby supplier.Name
+            select new InventoryProductSupplierOfferDto(
+                supplier.Id, supplier.Name, supplierProduct.UnitCost, supplierProduct.UpdatedAtUtc))
+            .ToListAsync(cancellationToken);
+
+        return Ok(offers);
     }
 
     [HttpGet("receipts")]
@@ -220,6 +254,16 @@ public sealed class InventoryCatalogController(
         };
 
         tenantDb.Products.Add(product);
+        if (product.SupplierId is Guid preferredSupplierId)
+        {
+            tenantDb.SupplierProducts.Add(new SupplierProduct
+            {
+                SupplierId = preferredSupplierId,
+                ProductId = product.Id,
+                UnitCost = 0,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+        }
         try
         {
             await tenantDb.SaveChangesAsync(cancellationToken);
@@ -259,6 +303,19 @@ public sealed class InventoryCatalogController(
         product.Size = request.Size?.Trim() ?? string.Empty;
         product.UnitPrice = request.UnitPrice;
         product.SupplierId = request.SupplierId;
+        if (product.SupplierId is Guid preferredSupplierId &&
+            !await tenantDb.SupplierProducts.AnyAsync(
+                item => item.SupplierId == preferredSupplierId && item.ProductId == product.Id,
+                cancellationToken))
+        {
+            tenantDb.SupplierProducts.Add(new SupplierProduct
+            {
+                SupplierId = preferredSupplierId,
+                ProductId = product.Id,
+                UnitCost = 0,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+        }
 
         try
         {
@@ -372,6 +429,102 @@ public sealed class InventoryCatalogController(
         return NoContent();
     }
 
+    [HttpGet("suppliers/{supplierId:guid}/products")]
+    public async Task<ActionResult<IReadOnlyList<SupplierProductDto>>> GetSupplierProducts(
+        Guid supplierId, CancellationToken cancellationToken)
+    {
+        if (!await tenantDb.Suppliers.AnyAsync(item => item.Id == supplierId, cancellationToken))
+            return NotFound(new { error = "Supplier was not found." });
+
+        var products = await (
+            from supplierProduct in tenantDb.SupplierProducts.AsNoTracking()
+            join product in tenantDb.Products.AsNoTracking()
+                on supplierProduct.ProductId equals product.Id
+            where supplierProduct.SupplierId == supplierId
+            orderby product.Name, product.Sku
+            select new SupplierProductDto(
+                product.Id, product.Sku, product.Name, product.Color, product.Size,
+                supplierProduct.UnitCost, supplierProduct.UpdatedAtUtc, product.IsActive))
+            .ToListAsync(cancellationToken);
+
+        return Ok(products);
+    }
+
+    [HttpPut("suppliers/{supplierId:guid}/products")]
+    public async Task<IActionResult> ReplaceSupplierProducts(
+        Guid supplierId, [FromBody] ReplaceSupplierProductsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!await tenantDb.Suppliers.AnyAsync(
+                item => item.Id == supplierId && item.IsActive, cancellationToken))
+            return BadRequest(new { error = "Choose an active supplier." });
+        if (request.Products.Count > 1000)
+            return BadRequest(new { error = "A supplier can have up to 1,000 linked products." });
+        if (request.Products.GroupBy(item => item.ProductId).Any(group => group.Count() > 1))
+            return BadRequest(new { error = "A product can appear only once for this supplier." });
+        if (request.Products.Any(item => item.UnitCost < 0 || item.UnitCost > 9999999999999999.99m))
+            return BadRequest(new { error = "Unit costs must be within the supported price range." });
+
+        var productIds = request.Products.Select(item => item.ProductId).ToArray();
+        var activeProductIds = await tenantDb.Products.AsNoTracking()
+            .Where(item => productIds.Contains(item.Id) && item.IsActive)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (activeProductIds.Count != productIds.Length)
+            return BadRequest(new { error = "Every linked item must be an active catalog product." });
+
+        await using var transaction = await tenantDb.Database.BeginTransactionAsync(cancellationToken);
+        var current = await tenantDb.SupplierProducts
+            .Where(item => item.SupplierId == supplierId)
+            .ToListAsync(cancellationToken);
+        var requestedByProduct = request.Products.ToDictionary(item => item.ProductId);
+
+        var removed = current.Where(item => !requestedByProduct.ContainsKey(item.ProductId)).ToList();
+        tenantDb.SupplierProducts.RemoveRange(removed);
+        foreach (var item in current.Where(item => requestedByProduct.ContainsKey(item.ProductId)))
+        {
+            item.UnitCost = requestedByProduct[item.ProductId].UnitCost;
+            item.UpdatedAtUtc = DateTime.UtcNow;
+        }
+        var currentIds = current.Select(item => item.ProductId).ToHashSet();
+        foreach (var item in request.Products.Where(item => !currentIds.Contains(item.ProductId)))
+        {
+            tenantDb.SupplierProducts.Add(new SupplierProduct
+            {
+                SupplierId = supplierId,
+                ProductId = item.ProductId,
+                UnitCost = item.UnitCost,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        // Keep the catalog's existing preferred-supplier field in sync for the Products table.
+        var affectedProductIds = request.Products.Select(item => item.ProductId)
+            .Concat(removed.Select(item => item.ProductId)).Distinct().ToArray();
+        var affectedProducts = await tenantDb.Products
+            .Where(item => affectedProductIds.Contains(item.Id))
+            .ToListAsync(cancellationToken);
+        foreach (var product in affectedProducts)
+        {
+            var remainsWithSelectedSupplier = requestedByProduct.ContainsKey(product.Id);
+            if (remainsWithSelectedSupplier && product.SupplierId is null)
+            {
+                product.SupplierId = supplierId;
+            }
+            else if (!remainsWithSelectedSupplier && product.SupplierId == supplierId)
+            {
+                product.SupplierId = await tenantDb.SupplierProducts
+                    .Where(item => item.ProductId == product.Id && item.SupplierId != supplierId)
+                    .Select(item => (Guid?)item.SupplierId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+        }
+
+        await tenantDb.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return NoContent();
+    }
+
     private async Task<string?> ValidateProductAsync(
         SaveInventoryProductRequest request,
         Guid? unchangedSupplierId,
@@ -447,7 +600,11 @@ public sealed class InventoryCatalogController(
 
 public sealed record InventoryProductDto(
     Guid Id, string Sku, string Name, string Color, string Size,
-    decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive);
+    decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive,
+    int SupplierCount = 0);
+
+public sealed record InventoryProductSupplierOfferDto(
+    Guid SupplierId, string SupplierName, decimal UnitCost, DateTime UpdatedAtUtc);
 
 public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
 
@@ -457,6 +614,14 @@ public sealed record ReceiveInventoryStockRequest(
 public sealed record InventoryStockReceiptDto(
     Guid Id, string Sku, string ProductName, string BranchName,
     string? SupplierName, int Quantity, string Reference, DateTime ReceivedAtUtc);
+
+public sealed record SupplierProductDto(
+    Guid ProductId, string Sku, string ProductName, string Color, string Size,
+    decimal UnitCost, DateTime UpdatedAtUtc, bool IsActive);
+
+public sealed record SupplierProductLineRequest(Guid ProductId, decimal UnitCost);
+
+public sealed record ReplaceSupplierProductsRequest(List<SupplierProductLineRequest> Products);
 
 public sealed record SaveInventoryProductRequest(
     string Sku, string Name, string? Color, string? Size, decimal UnitPrice, Guid? SupplierId);

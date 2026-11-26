@@ -6,6 +6,9 @@ using System.Runtime.InteropServices;
 using ThreadFlow.WinForms.ApiClient;
 using ThreadFlow.WinForms.Theme.Colors;
 
+using ConfirmDialog = ThreadFlow.WinForms.Theme.ConfirmDialog;
+using MessageBox = ThreadFlow.WinForms.Theme.AppMessageBox;
+
 namespace ThreadFlow.WinForms
 {
 
@@ -41,6 +44,7 @@ namespace ThreadFlow.WinForms
         private static readonly Shades BrandShades = new();
         private static readonly Tints BrandTints = new();
         private static readonly Color NavIconColor = Color.FromArgb(75, 85, 99);
+
 
         // Docker Desktop-style sidebar: light gray panel, inset pale-blue selection bar.
         private static readonly Color SidebarBackColor = Color.FromArgb(246, 247, 250);
@@ -97,12 +101,14 @@ namespace ThreadFlow.WinForms
         private readonly RoundedButton _refresh = MakeSecondaryButton("Refresh");
         private readonly RoundedButton _newProduct = MakePrimaryButton("New product");
         private readonly RoundedButton _editProduct = MakeSecondaryButton("Edit");
+        private readonly RoundedButton _viewProductOffers = MakeSecondaryButton("View supplier offers");
         private readonly RoundedButton _receiveFromProducts = MakeSecondaryButton("Receive stock");
         private readonly RoundedButton _toggleProduct = MakeSecondaryButton("Deactivate");
         private readonly RoundedButton _printSkuLabels = MakeSecondaryButton("Print SKU labels");
         private readonly RoundedButton _newSupplier = MakePrimaryButton("New supplier");
         private readonly RoundedButton _editSupplier = MakeSecondaryButton("Edit");
         private readonly RoundedButton _toggleSupplier = MakeSecondaryButton("Deactivate");
+        private readonly RoundedButton _supplierProducts = MakeSecondaryButton("Products and pricing");
         private readonly RoundedButton _receiveFromReceipts = MakePrimaryButton("Receive stock");
         private readonly RoundedButton _newOrder = MakePrimaryButton("New draft");
         private readonly RoundedButton _editOrder = MakeSecondaryButton("Edit draft");
@@ -388,16 +394,18 @@ namespace ThreadFlow.WinForms
             var card = MakeGridCard(_productsGrid);
             var footer = MakeFooter(
                 _productsHint,
-                _newProduct, _receiveFromProducts, _editProduct, _toggleProduct, _printSkuLabels);
+                _newProduct, _receiveFromProducts, _editProduct, _viewProductOffers, _toggleProduct, _printSkuLabels);
 
             _newProduct.Size = new Size(130, ButtonHeight);
             _receiveFromProducts.Size = new Size(130, ButtonHeight);
             _editProduct.Size = new Size(80, ButtonHeight);
+            _viewProductOffers.Size = new Size(168, ButtonHeight);
             _toggleProduct.Size = new Size(116, ButtonHeight);
             _printSkuLabels.Size = new Size(142, ButtonHeight);
 
             _newProduct.Click += (_, _) => ShowProductDialog(null);
             _editProduct.Click += (_, _) => ShowProductDialog(CurrentProduct());
+            _viewProductOffers.Click += async (_, _) => await ShowProductSupplierOffersAsync();
             _toggleProduct.Click += async (_, _) => await ToggleProductAsync();
             _printSkuLabels.Click += (_, _) => PrintCurrentProductLabels();
             _receiveFromProducts.Click += (_, _) => ShowReceiveDialog(CurrentProduct());
@@ -408,15 +416,17 @@ namespace ThreadFlow.WinForms
         private void BuildSuppliersPage()
         {
             var card = MakeGridCard(_suppliersGrid);
-            var footer = MakeFooter(_suppliersHint, _newSupplier, _editSupplier, _toggleSupplier);
+            var footer = MakeFooter(_suppliersHint, _newSupplier, _editSupplier, _toggleSupplier, _supplierProducts);
 
             _newSupplier.Size = new Size(140, ButtonHeight);
             _editSupplier.Size = new Size(80, ButtonHeight);
             _toggleSupplier.Size = new Size(116, ButtonHeight);
+            _supplierProducts.Size = new Size(170, ButtonHeight);
 
             _newSupplier.Click += (_, _) => ShowSupplierDialog(null);
             _editSupplier.Click += (_, _) => ShowSupplierDialog(CurrentSupplier());
             _toggleSupplier.Click += async (_, _) => await ToggleSupplierAsync();
+            _supplierProducts.Click += async (_, _) => await ShowSupplierProductsDialogAsync();
 
             AddPage(_suppliersPage, card, footer);
         }
@@ -1085,6 +1095,9 @@ namespace ThreadFlow.WinForms
 
         private void StyleGrid(DataGridView grid)
         {
+            // No row is highlighted until one is clicked, and clicking away drops it.
+            Theme.GridSelection.Enable(grid);
+
             grid.BackgroundColor = Palette.BackgroundSecondary.Color;
             grid.BorderStyle = BorderStyle.None;
             grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
@@ -1266,7 +1279,7 @@ namespace ThreadFlow.WinForms
             AddGridColumn(_productsGrid, nameof(ProductRow.Color), "Color", fit, 100, 70);
             AddGridColumn(_productsGrid, nameof(ProductRow.Size), "Size", fit, 100, 60);
             AddGridColumn(_productsGrid, nameof(ProductRow.UnitPrice), "Unit price", fit, 100, 90, format: "N2", alignRight: true);
-            AddGridColumn(_productsGrid, nameof(ProductRow.Supplier), "Supplier", fill, 120, 100, wrap: true);
+            AddGridColumn(_productsGrid, nameof(ProductRow.Supplier), "Suppliers", fit, 100, 90);
             AddGridColumn(_productsGrid, nameof(ProductRow.OnHand), "On hand", fit, 100, 80, format: "N0", alignRight: true);
             AddGridColumn(_productsGrid, StatusColumn, "Status", fit, 100, 90);
         }
@@ -1323,7 +1336,7 @@ namespace ThreadFlow.WinForms
             AddGridColumn(_stockGrid, nameof(StockRow.Size), "Size", fit, 100, 60);
             AddGridColumn(_stockGrid, nameof(StockRow.OnHand), "On hand", fit, 100, 80, format: "N0", alignRight: true);
             AddGridColumn(_stockGrid, nameof(StockRow.ReorderLevel), "Reorder at", fit, 100, 90, format: "N0", alignRight: true);
-            AddGridColumn(_stockGrid, nameof(StockRow.Supplier), "Supplier", fill, 120, 100, wrap: true);
+            AddGridColumn(_stockGrid, nameof(StockRow.Supplier), "Suppliers", fill, 150, 120, wrap: true);
             AddGridColumn(_stockGrid, StatusColumn, "Status", fit, 100, 90);
         }
 
@@ -1449,6 +1462,7 @@ namespace ThreadFlow.WinForms
                     {
                         grid.CurrentCell = row.Cells[firstVisible.Index];
                         row.Selected = true;
+                        Theme.GridSelection.MarkSelected(grid);
                         return;
                     }
                 }
@@ -1888,7 +1902,7 @@ namespace ThreadFlow.WinForms
             product.Color ?? string.Empty,
             product.Size ?? string.Empty,
             product.UnitPrice,
-            string.IsNullOrWhiteSpace(product.SupplierName) ? "—" : product.SupplierName,
+            FormatSupplierCount(product.SupplierCount),
             product.QuantityOnHand,
             product.IsActive ? "Active" : "Inactive",
             product);
@@ -1929,7 +1943,7 @@ namespace ThreadFlow.WinForms
             product.Size ?? string.Empty,
             product.QuantityOnHand,
             product.ReorderLevel,
-            string.IsNullOrWhiteSpace(product.SupplierName) ? "—" : product.SupplierName,
+            FormatSupplierCount(product.SupplierCount),
             product.IsActive ? "Active" : "Inactive",
             product);
 
@@ -2102,17 +2116,26 @@ namespace ThreadFlow.WinForms
         {
             var product = CurrentProduct();
             _editProduct.Enabled = product is not null;
+            _viewProductOffers.Enabled = product is not null;
             _toggleProduct.Enabled = product is not null;
             _printSkuLabels.Enabled = product is not null;
             _toggleProduct.Text = product is { IsActive: false } ? "Reactivate" : "Deactivate";
             UpdateReceiveActions();
         }
 
+        private static string FormatSupplierCount(int count) => count switch
+        {
+            0 => "0 suppliers",
+            1 => "1 supplier",
+            _ => $"{count} suppliers"
+        };
+
         private void UpdateSupplierActions()
         {
             var supplier = CurrentSupplier();
             _editSupplier.Enabled = supplier is not null;
             _toggleSupplier.Enabled = supplier is not null;
+            _supplierProducts.Enabled = supplier is { IsActive: true };
             _toggleSupplier.Text = supplier is { IsActive: false } ? "Reactivate" : "Deactivate";
         }
 
@@ -2237,16 +2260,12 @@ namespace ThreadFlow.WinForms
             price.Value = existing is null
                 ? 0
                 : Math.Min(price.Maximum, Math.Max(price.Minimum, existing.UnitPrice));
-            var supplier = new SelectBox();
-            BindSupplierChoices(supplier, existing?.SupplierId, "— No supplier —");
-
-            var form = MakeFormGrid(4);
+            var form = MakeFormGrid(3);
             AddField(form, MakeField("SKU", sku, required: true), 0, 0);
             AddField(form, MakeField("Unit price", price), 1, 0);
             AddField(form, MakeField("Product name", name, required: true), 0, 1, span: 2);
             AddField(form, MakeField("Color", color), 0, 2);
             AddField(form, MakeField("Size", size), 1, 2);
-            AddField(form, MakeField("Primary supplier", supplier), 0, 3, span: 2);
 
             async Task<string?> SaveAsync()
             {
@@ -2261,7 +2280,7 @@ namespace ThreadFlow.WinForms
                         color.Text.Trim(),
                         size.Text.Trim(),
                         price.Value,
-                        (supplier.SelectedItem as SupplierChoice)?.Id);
+                        existing?.SupplierId);
                     var saved = await _api.SaveProductAsync(existing?.Id, request);
                     await RefreshProductsAsync(saved.Id);
                     _productsHintText = $"Saved {saved.Sku} — {saved.Name}.";
@@ -2280,10 +2299,51 @@ namespace ThreadFlow.WinForms
                 isNew ? "Enter the product details and save." : "Update the product details and save.",
                 "Save product",
                 form,
-                4 * FieldRowHeight,
-                SaveAsync,
-                () => SelectSupplierChoice(supplier, existing?.SupplierId));
+                3 * FieldRowHeight,
+                SaveAsync);
             dialog.ShowDialog(this);
+        }
+
+        private async Task ShowProductSupplierOffersAsync()
+        {
+            if (CurrentProduct() is not { } product)
+                return;
+
+            try
+            {
+                var offers = await _api.GetProductSupplierOffersAsync(product.Id);
+                var grid = new DataGridView();
+                StyleGrid(grid);
+                AddGridColumn(grid, nameof(ProductSupplierOfferRow.Supplier), "Supplier", DataGridViewAutoSizeColumnMode.Fill, 180, 140, wrap: true);
+                AddGridColumn(grid, nameof(ProductSupplierOfferRow.UnitCost), "Quoted unit cost", DataGridViewAutoSizeColumnMode.AllCells, 130, 125, format: "N2", alignRight: true);
+                AddGridColumn(grid, nameof(ProductSupplierOfferRow.UpdatedAt), "Price updated", DataGridViewAutoSizeColumnMode.AllCells, 140, 130, format: "g");
+                grid.DataSource = offers.Select(item => new ProductSupplierOfferRow(
+                    item.SupplierName, item.UnitCost, item.UpdatedAtUtc.ToLocalTime())).ToList();
+                ClearGridSelection(grid);
+
+                var body = new Panel
+                {
+                    BackColor = Palette.BackgroundSecondary.Color,
+                    Size = new Size(552, 190)
+                };
+                grid.Dock = DockStyle.Fill;
+                body.Controls.Add(grid);
+
+                Task<string?> DoneAsync() => Task.FromResult<string?>(null);
+                using var dialog = new EditorDialog(
+                    "Supplier offers",
+                    $"Suppliers for {product.Sku}",
+                    $"{product.Name} — {offers.Count} linked supplier(s). Manage offers from the Suppliers page.",
+                    "Done",
+                    body,
+                    190,
+                    DoneAsync);
+                dialog.ShowDialog(this);
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(this, exception.Message, "Could not load supplier offers", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ShowSupplierDialog(InventorySupplierDto? existing)
@@ -2340,6 +2400,231 @@ namespace ThreadFlow.WinForms
             dialog.ShowDialog(this);
         }
 
+        private async Task ShowSupplierProductsDialogAsync()
+        {
+            if (CurrentSupplier() is not { IsActive: true } supplier)
+                return;
+
+            List<InventorySupplierProductDto> linked;
+            try
+            {
+                linked = await _api.GetSupplierProductsAsync(supplier.Id);
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not load supplier products", InventoryPage.Suppliers);
+                return;
+            }
+
+            var grid = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AutoGenerateColumns = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false
+            };
+            StyleGrid(grid);
+            grid.ReadOnly = true;
+            AddGridColumn(grid, nameof(SupplierProductEditRow.Sku), "SKU",
+                DataGridViewAutoSizeColumnMode.AllCells, 100, 75);
+            AddGridColumn(grid, nameof(SupplierProductEditRow.Product), "Product",
+                DataGridViewAutoSizeColumnMode.Fill, 160, 100, wrap: true);
+            AddGridColumn(grid, nameof(SupplierProductEditRow.UnitCost), "Quoted unit cost",
+                DataGridViewAutoSizeColumnMode.AllCells, 120, 105, format: "N2", alignRight: true);
+            AddGridColumn(grid, nameof(SupplierProductEditRow.ProductId), "Product id",
+                DataGridViewAutoSizeColumnMode.None, 2, 2);
+            var linkedRows = linked.Select(item => new SupplierProductEditRow(
+                item.ProductId, item.Sku, FormatProductName(item.ProductName, item.Color, item.Size), item.UnitCost)).ToList();
+
+            void BindRows()
+            {
+                grid.DataSource = null;
+                grid.DataSource = linkedRows.ToList();
+                if (grid.Columns[nameof(SupplierProductEditRow.ProductId)] is { } idColumn)
+                    idColumn.Visible = false;
+                if (grid.Columns[nameof(SupplierProductEditRow.Sku)] is { } skuColumn)
+                    skuColumn.ReadOnly = true;
+                if (grid.Columns[nameof(SupplierProductEditRow.Product)] is { } productColumn)
+                    productColumn.ReadOnly = true;
+                if (grid.Columns[nameof(SupplierProductEditRow.UnitCost)] is { } costColumn)
+                    costColumn.ReadOnly = true;
+                if (grid.Columns[nameof(SupplierProductEditRow.ProductId)] is { } hiddenIdColumn)
+                    hiddenIdColumn.ReadOnly = true;
+            }
+
+            var productChoices = _products
+                .Where(item => item.IsActive || linkedRows.Any(row => row.ProductId == item.Id))
+                .OrderBy(item => item.Name)
+                .Select(item => new ProductChoice(item.Id, FormatProductName(item.Name, item.Color, item.Size), item.SupplierId))
+                .ToList();
+            var product = new SelectBox { DropDownStyle = ComboBoxStyle.DropDownList };
+            product.DataSource = productChoices;
+            product.DisplayMember = nameof(ProductChoice.Label);
+            product.ValueMember = nameof(ProductChoice.Id);
+            var unitCost = new NumericUpDown
+            {
+                DecimalPlaces = 2,
+                ThousandsSeparator = true,
+                Minimum = 0,
+                Maximum = 100000000
+            };
+            var saveProductPrice = MakeSecondaryButton("Add product");
+            saveProductPrice.Size = new Size(140, ButtonHeight);
+            var remove = MakeSecondaryButton("Remove product");
+            remove.Size = new Size(145, ButtonHeight);
+            void SyncPriceEditor(Guid? selectedProductId = null)
+            {
+                if (selectedProductId is Guid id && product.IsHandleCreated)
+                    product.SelectedValue = id;
+                var choice = product.SelectedItem as ProductChoice;
+                var existingPrice = choice is null
+                    ? null
+                    : linkedRows.FirstOrDefault(row => row.ProductId == choice.Id);
+                unitCost.Value = existingPrice is null
+                    ? 0
+                    : Math.Clamp(existingPrice.UnitCost, unitCost.Minimum, unitCost.Maximum);
+                saveProductPrice.Text = existingPrice is null ? "Add product" : "Update price";
+                remove.Enabled = existingPrice is not null;
+            }
+
+            product.SelectionChangeCommitted += (_, _) => SyncPriceEditor();
+            grid.SelectionChanged += (_, _) =>
+            {
+                if (grid.CurrentRow?.DataBoundItem is SupplierProductEditRow selected)
+                    SyncPriceEditor(selected.ProductId);
+            };
+            grid.CellClick += (_, e) =>
+            {
+                if (e.RowIndex >= 0 && grid.Rows[e.RowIndex].DataBoundItem is SupplierProductEditRow selected)
+                    SyncPriceEditor(selected.ProductId);
+            };
+
+            saveProductPrice.Click += (_, _) =>
+            {
+                if (product.SelectedItem is not ProductChoice choice)
+                    return;
+                var item = _products.FirstOrDefault(value => value.Id == choice.Id);
+                if (item is null)
+                    return;
+
+                var existingPrice = linkedRows.FirstOrDefault(row => row.ProductId == item.Id);
+                if (existingPrice is null)
+                {
+                    linkedRows.Add(new SupplierProductEditRow(
+                        item.Id, item.Sku, FormatProductName(item.Name, item.Color, item.Size), unitCost.Value));
+                }
+                else
+                {
+                    existingPrice.UnitCost = unitCost.Value;
+                }
+
+                BindRows();
+                var rowIndex = linkedRows.FindIndex(row => row.ProductId == item.Id);
+                if (rowIndex >= 0 && rowIndex < grid.Rows.Count)
+                {
+                    grid.CurrentCell = grid.Rows[rowIndex].Cells[nameof(SupplierProductEditRow.UnitCost)];
+                    grid.Rows[rowIndex].Selected = true;
+                }
+                SyncPriceEditor(item.Id);
+            };
+            remove.Click += (_, _) =>
+            {
+                var selected = product.SelectedItem is ProductChoice choice
+                    ? linkedRows.FirstOrDefault(row => row.ProductId == choice.Id)
+                    : null;
+                if (selected is null)
+                    return;
+                linkedRows.RemoveAll(row => row.ProductId == selected.ProductId);
+                BindRows();
+                SyncPriceEditor(selected.ProductId);
+            };
+
+            // The linked list on top, then an "add a catalog product" band with its own button row.
+            const int bodyWidth = 552;
+            const int gridHeight = 176;
+            const int bandTop = gridHeight + 22;
+            const int actionTop = bandTop + FieldRowHeight + 6;
+
+            grid.Location = new Point(0, 0);
+            grid.Size = new Size(bodyWidth, gridHeight);
+            grid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+            var bandDivider = new Panel
+            {
+                BackColor = BrandTints.iceBlue.Color,
+                Location = new Point(0, gridHeight + 12),
+                Size = new Size(bodyWidth, 1),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            var addProductFields = MakeFormGrid(1);
+            addProductFields.Location = new Point(0, bandTop);
+            addProductFields.Size = new Size(bodyWidth, FieldRowHeight);
+            addProductFields.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            AddField(addProductFields, MakeField("Catalog product", product), 0, 0);
+            AddField(addProductFields, MakeField("Quoted unit cost", unitCost), 1, 0);
+
+            saveProductPrice.Location = new Point(bodyWidth - 8 - remove.Width - 10 - saveProductPrice.Width, actionTop);
+            remove.Location = new Point(bodyWidth - 8 - remove.Width, actionTop);
+
+            var body = new Panel
+            {
+                BackColor = Palette.BackgroundSecondary.Color,
+                Size = new Size(bodyWidth, actionTop + ButtonHeight + 8)
+            };
+            body.Controls.Add(grid);
+            body.Controls.Add(bandDivider);
+            body.Controls.Add(addProductFields);
+            body.Controls.Add(saveProductPrice);
+            body.Controls.Add(remove);
+            BindRows();
+            SyncPriceEditor();
+
+            async Task<string?> SaveAsync()
+            {
+                try
+                {
+                    grid.EndEdit();
+                    var rows = new List<SupplierProductLineRequest>();
+                    foreach (DataGridViewRow row in grid.Rows)
+                    {
+                        if (row.Cells[nameof(SupplierProductEditRow.ProductId)].Value is not Guid productId ||
+                            !decimal.TryParse(Convert.ToString(row.Cells[nameof(SupplierProductEditRow.UnitCost)].Value), out var cost) ||
+                            cost < 0)
+                            return "Enter a valid non-negative quoted unit cost for every linked product.";
+                        rows.Add(new SupplierProductLineRequest(productId, cost));
+                    }
+
+                    await _api.SaveSupplierProductsAsync(supplier.Id, rows);
+                    _suppliersHintText = $"Saved {rows.Count} product price(s) for {supplier.Name}.";
+                    RefreshHints();
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    return DescribeError(exception);
+                }
+            }
+
+            using var dialog = new EditorDialog(
+                $"Products and pricing — {supplier.Name}",
+                "Supplier products and prices",
+                "Link existing catalog products and keep this supplier's quoted unit costs up to date.",
+                "Save prices",
+                body,
+                body.Height,
+                SaveAsync);
+
+            dialog.ShowDialog(this);
+        }
+
+        private static string FormatProductName(string name, string? color, string? size)
+        {
+            var details = string.Join(" / ", new[] { color, size }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            return string.IsNullOrWhiteSpace(details) ? name : $"{name} ({details})";
+        }
+
         private void ShowReceiveDialog(InventoryProductDto? preselect)
         {
             if (_selectedBranch is not { } branch)
@@ -2353,7 +2638,7 @@ namespace ThreadFlow.WinForms
                 .Where(item => item.IsActive)
                 .OrderBy(item => item.Name)
                 .Select(item => new ProductChoice(
-                    item.Id, $"{item.Sku} — {item.Name}", item.SupplierId))
+                    item.Id, FormatProductName(item.Name, item.Color, item.Size), item.SupplierId))
                 .ToList();
             if (choices.Count == 0)
             {
@@ -2454,7 +2739,7 @@ namespace ThreadFlow.WinForms
                 $"Size: {(string.IsNullOrWhiteSpace(product.Size) ? "—" : product.Size)}\r\n" +
                 $"On hand: {product.QuantityOnHand}\r\n" +
                 $"Reorder alert at: {(product.ReorderLevel > 0 ? product.ReorderLevel.ToString() : "Not set")}\r\n" +
-                $"Supplier: {(string.IsNullOrWhiteSpace(product.SupplierName) ? "Unspecified" : product.SupplierName)}\r\n" +
+                $"Suppliers: {FormatSupplierCount(product.SupplierCount)}\r\n" +
                 $"Unit price: {product.UnitPrice:N2}\r\n" +
                 $"Status: {(product.IsActive ? "Active" : "Inactive")}",
                 "Stock details", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2510,15 +2795,31 @@ namespace ThreadFlow.WinForms
                 return;
             }
 
-            var productChoices = _products
-                .Where(product => product.IsActive)
-                .OrderBy(product => product.Name)
-                .Select(product => new ProductChoice(
-                    product.Id, $"{product.Sku} — {product.Name}", product.SupplierId))
+            var initialSupplierId = existing?.SupplierId ?? supplierChoices[0].Id ?? Guid.Empty;
+            Dictionary<Guid, decimal> supplierUnitCosts;
+            try
+            {
+                supplierUnitCosts = (await _api.GetSupplierProductsAsync(initialSupplierId))
+                    .ToDictionary(item => item.ProductId, item => item.UnitCost);
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception, "Could not load supplier prices", InventoryPage.Orders);
+                return;
+            }
+
+            List<ProductChoice> BuildProductChoices() => _products
+                .Where(item => (item.IsActive || existing?.Lines.Any(line => line.ProductId == item.Id) == true) &&
+                    (supplierUnitCosts.ContainsKey(item.Id) || existing?.Lines.Any(line => line.ProductId == item.Id) == true))
+                .OrderBy(item => item.Name)
+                .Select(item => new ProductChoice(item.Id, FormatProductName(item.Name, item.Color, item.Size), item.SupplierId))
                 .ToList();
+
+            var productChoices = BuildProductChoices();
             if (productChoices.Count == 0)
             {
-                MessageBox.Show(this, "Add an active product before creating a purchase order.",
+                MessageBox.Show(this,
+                    "This supplier has no linked products yet. Add products and their quoted prices from the Suppliers page first.",
                     "Purchase orders", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -2533,9 +2834,22 @@ namespace ThreadFlow.WinForms
             var notes = new TextBox { MaxLength = 1000 };
 
             var product = new SelectBox();
-            product.DataSource = productChoices;
-            product.DisplayMember = nameof(ProductChoice.Label);
-            product.ValueMember = nameof(ProductChoice.Id);
+            void BindProductChoices(Guid? selectedProductId = null)
+            {
+                var choices = BuildProductChoices();
+                product.DataSource = null;
+                product.DataSource = choices;
+                product.DisplayMember = nameof(ProductChoice.Label);
+                product.ValueMember = nameof(ProductChoice.Id);
+                if (product.IsHandleCreated && product.Items.Count > 0)
+                {
+                    var selectedIndex = selectedProductId is Guid id
+                        ? choices.FindIndex(item => item.Id == id)
+                        : -1;
+                    product.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+                }
+            }
+            BindProductChoices();
 
             var quantity = new NumericUpDown
             {
@@ -2549,7 +2863,49 @@ namespace ThreadFlow.WinForms
             {
                 DecimalPlaces = 2,
                 ThousandsSeparator = true,
-                Maximum = 100000000
+                Maximum = 100000000,
+                Value = productChoices.Count > 0 && supplierUnitCosts.TryGetValue(productChoices[0].Id, out var firstCost)
+                    ? Math.Clamp(firstCost, 0, 100000000)
+                    : 0
+            };
+            var supplierPricesLoading = false;
+
+            product.SelectionChangeCommitted += (_, _) =>
+            {
+                if (product.SelectedItem is ProductChoice choice)
+                    unitCost.Value = supplierUnitCosts.TryGetValue(choice.Id, out var savedCost)
+                        ? Math.Clamp(savedCost, unitCost.Minimum, unitCost.Maximum)
+                        : 0;
+            };
+
+            supplier.SelectionChangeCommitted += async (_, _) =>
+            {
+                if (supplier.SelectedItem is not SupplierChoice choice || choice.Id is not Guid supplierId)
+                    return;
+                supplierPricesLoading = true;
+                try
+                {
+                    var prices = await _api.GetSupplierProductsAsync(supplierId);
+                    supplierUnitCosts.Clear();
+                    foreach (var price in prices)
+                        supplierUnitCosts[price.ProductId] = price.UnitCost;
+                    BindProductChoices();
+                    if (product.SelectedItem is ProductChoice selectedProduct)
+                        unitCost.Value = supplierUnitCosts.TryGetValue(selectedProduct.Id, out var savedCost)
+                            ? Math.Clamp(savedCost, unitCost.Minimum, unitCost.Maximum)
+                            : 0;
+                }
+                catch (Exception exception)
+                {
+                    supplierUnitCosts.Clear();
+                    unitCost.Value = 0;
+                    MessageBox.Show(this, DescribeError(exception), "Could not load supplier prices",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    supplierPricesLoading = false;
+                }
             };
 
             var lines = new List<SavePurchaseOrderLineRequest>();
@@ -2598,8 +2954,19 @@ namespace ThreadFlow.WinForms
 
             addLine.Click += (_, _) =>
             {
-                if (product.SelectedItem is not ProductChoice choice)
+                if (supplierPricesLoading)
+                {
+                    MessageBox.Show(addLine.FindForm(), "Wait for this supplier's saved prices to load.",
+                        "Purchase order", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
+                }
+                if (product.SelectedItem is not ProductChoice choice)
+                {
+                    MessageBox.Show(addLine.FindForm(),
+                        "This supplier has no linked products. Add a product and its quoted price on the Suppliers page first.",
+                        "Purchase order", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
 
                 if (lines.Any(line => line.ProductId == choice.Id))
                 {
@@ -2642,7 +3009,7 @@ namespace ThreadFlow.WinForms
             AddField(fields, MakeField("Expected delivery (optional)", expected), 1, 0);
             AddField(fields, MakeField("Item to add", product, required: true), 0, 1, span: 2);
             AddField(fields, MakeField("Quantity", quantity, required: true), 0, 2);
-            AddField(fields, MakeField("Unit cost", unitCost), 1, 2);
+            AddField(fields, MakeField("Supplier price per unit", unitCost), 1, 2);
             AddField(fields, MakeField("Notes (optional)", notes), 0, 3, span: 2);
             fields.Dock = DockStyle.Top;
             fields.Height = 4 * FieldRowHeight;
@@ -2686,7 +3053,7 @@ namespace ThreadFlow.WinForms
                 existing is null ? "New purchase order" : "Edit purchase order",
                 existing is null ? "New draft" : "Edit draft",
                 existing is null
-                    ? $"Drafting an order for {branch.Name}."
+                    ? $"Drafting an order for {branch.Name}. Saved supplier prices fill the unit cost."
                     : $"Updating {existing.Number} for {branch.Name}.",
                 "Save draft",
                 body,
@@ -3379,6 +3746,8 @@ namespace ThreadFlow.WinForms
             string Status,
             InventoryProductDto Source);
 
+        private sealed record ProductSupplierOfferRow(string Supplier, decimal UnitCost, DateTime UpdatedAt);
+
         private sealed record SupplierRow(
             string Name,
             string Contact,
@@ -3437,6 +3806,14 @@ namespace ThreadFlow.WinForms
             string Product,
             int Quantity,
             decimal UnitCost);
+
+        private sealed class SupplierProductEditRow(Guid productId, string sku, string product, decimal unitCost)
+        {
+            public Guid ProductId { get; } = productId;
+            public string Sku { get; } = sku;
+            public string Product { get; } = product;
+            public decimal UnitCost { get; set; } = unitCost;
+        }
 
         private sealed record SupplierChoice(Guid? Id, string Label);
         private sealed record ProductChoice(Guid Id, string Label, Guid? SupplierId);
@@ -4325,13 +4702,13 @@ namespace ThreadFlow.WinForms
         }
 
         /// <summary>
-        /// A borderless dialog in the same style as the invitation dialog in Platform Admin: blue
-        /// header, title, fields, and Cancel / Save buttons. Save runs the supplied action; if it
-        /// returns an error message the dialog stays open and shows it, so nothing typed is lost.
+        /// A rounded white card dialog: heading and subtitle at the top, the caller's body in the
+        /// middle and Cancel / Save in a footer, floating over a dimmed backdrop. Save runs the
+        /// supplied action; if it returns an error message the dialog stays open and shows it, so
+        /// nothing typed is lost.
         /// </summary>
         private sealed class EditorDialog : Form
         {
-            private const int DialogHeaderHeight = 40;
             private const int DialogWidth = 600;
             private const int ErrorHeight = 44;
 
@@ -4354,98 +4731,31 @@ namespace ThreadFlow.WinForms
                 _saveAsync = saveAsync;
 
                 Theme.ThreadFlowTheme.Apply(this);
+                Theme.DialogChrome.Prepare(this);
 
                 SuspendLayout();
 
-                const int left = 24;
-                var innerWidth = DialogWidth - left * 2;
-                var bodyTop = 104 + DialogHeaderHeight;
+                var pad = Theme.DialogChrome.Pad;
+                var innerWidth = DialogWidth - pad * 2;
+                var bodyTop = Theme.DialogChrome.HeaderHeight + 20;
 
                 // Keep the whole dialog on screen: a tall body would otherwise push the
                 // Cancel / Save buttons past the bottom of the working area.
                 var availableHeight = AvailableClientHeight();
-                var fixedHeight = bodyTop + 4 + ErrorHeight + 4 + ButtonHeight + 24;
+                var fixedHeight = bodyTop + 8 + 8 + ErrorHeight + 8 + ButtonHeight + pad;
                 var requestedBodyHeight = bodyHeight;
                 if (fixedHeight + bodyHeight > availableHeight)
                     bodyHeight = Math.Max(200, availableHeight - fixedHeight);
 
-                var errorTop = bodyTop + bodyHeight + 4;
-                var buttonTop = errorTop + ErrorHeight + 4;
+                var footerDividerTop = bodyTop + bodyHeight + 8;
+                var errorTop = footerDividerTop + 8;
+                var buttonTop = errorTop + ErrorHeight + 8;
 
-                Text = headerText;
-                BackColor = Palette.BackgroundSecondary.Color;
-                ClientSize = new Size(DialogWidth, buttonTop + ButtonHeight + 24);
-                StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.None;
-                ShowInTaskbar = false;
+                Text = string.IsNullOrWhiteSpace(headerText) ? title : headerText;
+                ClientSize = new Size(DialogWidth, buttonTop + ButtonHeight + pad);
 
-                var header = new Panel
-                {
-                    BackColor = Palette.Primary.Color,
-                    Location = Point.Empty,
-                    Size = new Size(DialogWidth, DialogHeaderHeight),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                };
-                var headerTitle = new Label
-                {
-                    Text = headerText,
-                    Font = TopBarBrandFont,
-                    ForeColor = Color.White,
-                    BackColor = Color.Transparent,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Location = new Point(18, 0),
-                    Size = new Size(DialogWidth - 18 - 46, DialogHeaderHeight)
-                };
-                var closeHeader = new CaptionButton(CaptionGlyph.Close)
-                {
-                    Location = new Point(DialogWidth - 46, 0),
-                    Size = new Size(46, DialogHeaderHeight),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right
-                };
-                closeHeader.Click += (_, _) => DialogResult = DialogResult.Cancel;
-
-                void BeginHeaderDrag(object? sender, MouseEventArgs e)
-                {
-                    if (e.Button != MouseButtons.Left || e.Clicks != 1)
-                        return;
-
-                    ReleaseCapture();
-                    _ = SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
-                }
-
-                header.MouseDown += BeginHeaderDrag;
-                headerTitle.MouseDown += BeginHeaderDrag;
-                header.Controls.Add(headerTitle);
-                header.Controls.Add(closeHeader);
-
-                var titleLabel = new Label
-                {
-                    Text = title,
-                    Font = TitleFont,
-                    ForeColor = Palette.TextPrimary.Color,
-                    BackColor = Color.Transparent,
-                    AutoSize = false,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Location = new Point(left, 20 + DialogHeaderHeight),
-                    Size = new Size(innerWidth, 34)
-                };
-                var subtitleLabel = new Label
-                {
-                    Text = subtitle,
-                    Font = SubtitleFont,
-                    ForeColor = Palette.TextSecondary.Color,
-                    BackColor = Color.Transparent,
-                    AutoSize = false,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Location = new Point(left, 56 + DialogHeaderHeight),
-                    Size = new Size(innerWidth, 20)
-                };
-                var divider = new Panel
-                {
-                    BackColor = BrandTints.iceBlue.Color,
-                    Location = new Point(left, 88 + DialogHeaderHeight),
-                    Size = new Size(innerWidth, 1)
-                };
+                var heading = string.IsNullOrWhiteSpace(headerText) ? title : headerText;
+                var header = Theme.DialogChrome.CreateHeader(this, heading, subtitle, DialogWidth);
 
                 Control bodySlot;
                 if (bodyHeight < requestedBodyHeight)
@@ -4455,7 +4765,7 @@ namespace ThreadFlow.WinForms
                     var scroll = new Panel
                     {
                         BackColor = Palette.BackgroundSecondary.Color,
-                        Location = new Point(left, bodyTop),
+                        Location = new Point(pad, bodyTop),
                         Size = new Size(innerWidth, bodyHeight),
                         AutoScroll = true
                     };
@@ -4469,7 +4779,7 @@ namespace ThreadFlow.WinForms
                 }
                 else
                 {
-                    body.Location = new Point(left, bodyTop);
+                    body.Location = new Point(pad, bodyTop);
                     body.Size = new Size(innerWidth, bodyHeight);
                     bodySlot = body;
                 }
@@ -4479,20 +4789,22 @@ namespace ThreadFlow.WinForms
                 _error.BackColor = Color.Transparent;
                 _error.AutoSize = false;
                 _error.TextAlign = ContentAlignment.TopLeft;
-                _error.Location = new Point(left, errorTop);
+                _error.Location = new Point(pad, errorTop);
                 _error.Size = new Size(innerWidth, ErrorHeight);
 
                 _save = MakePrimaryButton(saveText);
-                _save.Location = new Point(DialogWidth - left - 150, buttonTop);
                 _save.Size = new Size(150, ButtonHeight);
+                _save.Location = new Point(DialogWidth - pad - 150, buttonTop);
                 _save.Click += async (_, _) => await SubmitAsync();
 
                 _cancel = MakeSecondaryButton("Cancel");
-                _cancel.Location = new Point(DialogWidth - left - 150 - 12 - 110, buttonTop);
                 _cancel.Size = new Size(110, ButtonHeight);
+                _cancel.Location = new Point(_save.Left - 12 - 110, buttonTop);
                 _cancel.DialogResult = DialogResult.Cancel;
 
-                Controls.AddRange([header, titleLabel, subtitleLabel, divider, bodySlot, _error, _save, _cancel]);
+                var footerDivider = Theme.DialogChrome.CreateDivider(DialogWidth, footerDividerTop);
+
+                Controls.AddRange([header, bodySlot, footerDivider, _error, _save, _cancel]);
 
                 AutoScaleDimensions = new SizeF(96F, 96F);
                 AutoScaleMode = AutoScaleMode.Dpi;
@@ -4577,124 +4889,6 @@ namespace ThreadFlow.WinForms
                         _cancel.Enabled = true;
                     }
                 }
-            }
-        }
-
-        /// <summary>
-        /// A small borderless confirmation prompt: light header with a close button, title, one
-        /// line of text, Cancel and confirm buttons. Returns DialogResult.OK when confirmed;
-        /// Cancel, the close button or Esc all return Cancel.
-        /// </summary>
-        private sealed class ConfirmDialog : Form
-        {
-            private const int DialogWidth = 340;
-            private const int DialogHeight = 160;
-            private const int DialogHeaderHeight = 32;
-            private const int DialogButtonHeight = 36;
-
-            private static readonly Color HeaderBackColor = Color.FromArgb(238, 241, 248);
-
-            public ConfirmDialog(string headerText, string title, string message, string confirmText, string cancelText = "Cancel")
-            {
-                Theme.ThreadFlowTheme.Apply(this);
-
-                SuspendLayout();
-
-                const int pad = 20;
-                var innerWidth = DialogWidth - pad * 2;
-
-                Text = headerText;
-                BackColor = Palette.BackgroundSecondary.Color;
-                ClientSize = new Size(DialogWidth, DialogHeight);
-                StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.None;
-                ShowInTaskbar = false;
-
-                var header = new Panel
-                {
-                    BackColor = HeaderBackColor,
-                    Location = Point.Empty,
-                    Size = new Size(DialogWidth, DialogHeaderHeight),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                };
-                var headerTitle = new Label
-                {
-                    Text = headerText,
-                    Font = SubtitleFont,
-                    ForeColor = Palette.TextPrimary.Color,
-                    BackColor = Color.Transparent,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Location = new Point(12, 0),
-                    Size = new Size(DialogWidth - 12 - 40, DialogHeaderHeight)
-                };
-                var closeHeader = new CaptionButton(CaptionGlyph.Close)
-                {
-                    GlyphColor = Palette.TextPrimary.Color,
-                    Location = new Point(DialogWidth - 40, 0),
-                    Size = new Size(40, DialogHeaderHeight),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right
-                };
-                closeHeader.Click += (_, _) => DialogResult = DialogResult.Cancel;
-
-                void BeginHeaderDrag(object? sender, MouseEventArgs e)
-                {
-                    if (e.Button != MouseButtons.Left || e.Clicks != 1)
-                        return;
-
-                    ReleaseCapture();
-                    _ = SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
-                }
-
-                header.MouseDown += BeginHeaderDrag;
-                headerTitle.MouseDown += BeginHeaderDrag;
-                header.Controls.Add(headerTitle);
-                header.Controls.Add(closeHeader);
-
-                var titleLabel = new Label
-                {
-                    Text = title,
-                    Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
-                    ForeColor = Palette.TextPrimary.Color,
-                    BackColor = Color.Transparent,
-                    AutoSize = false,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Location = new Point(pad, DialogHeaderHeight + 14),
-                    Size = new Size(innerWidth, 26)
-                };
-                var messageLabel = new Label
-                {
-                    Text = message,
-                    Font = SubtitleFont,
-                    ForeColor = Palette.TextSecondary.Color,
-                    BackColor = Color.Transparent,
-                    AutoSize = false,
-                    TextAlign = ContentAlignment.TopLeft,
-                    Location = new Point(pad, DialogHeaderHeight + 42),
-                    Size = new Size(innerWidth, 20)
-                };
-
-                var buttonTop = DialogHeight - pad + 2 - DialogButtonHeight;
-
-                var confirm = MakePrimaryButton(confirmText);
-                confirm.Size = new Size(96, DialogButtonHeight);
-                confirm.Location = new Point(DialogWidth - pad - confirm.Width, buttonTop);
-                confirm.DialogResult = DialogResult.OK;
-
-                var cancel = MakeSecondaryButton(cancelText);
-                cancel.Size = new Size(88, DialogButtonHeight);
-                cancel.Location = new Point(confirm.Left - 10 - cancel.Width, buttonTop);
-                cancel.DialogResult = DialogResult.Cancel;
-
-                Controls.AddRange([header, titleLabel, messageLabel, confirm, cancel]);
-
-                AutoScaleDimensions = new SizeF(96F, 96F);
-                AutoScaleMode = AutoScaleMode.Dpi;
-
-                ResumeLayout(false);
-                PerformLayout();
-
-                AcceptButton = confirm;
-                CancelButton = cancel;
             }
         }
 
@@ -6024,6 +6218,14 @@ namespace ThreadFlow.WinForms.ApiClient
                 $"api/inventory/products?branchId={branchId}", cancellationToken) ?? [];
         }
 
+        public async Task<List<InventoryProductSupplierOfferDto>> GetProductSupplierOffersAsync(
+            Guid productId, CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventoryProductSupplierOfferDto>>(
+                $"api/inventory/products/{productId}/suppliers", cancellationToken) ?? [];
+        }
+
         public async Task<List<InventoryStockReceiptDto>> GetReceiptsAsync(Guid branchId, CancellationToken cancellationToken = default)
         {
             ApiSession.ApplyAuthorization(Http);
@@ -6043,6 +6245,21 @@ namespace ThreadFlow.WinForms.ApiClient
             return await Http.GetFromJsonAsync<List<InventorySupplierDto>>(
                 "api/inventory/suppliers", cancellationToken) ?? [];
         }
+
+        public async Task<List<InventorySupplierProductDto>> GetSupplierProductsAsync(
+            Guid supplierId, CancellationToken cancellationToken = default)
+        {
+            ApiSession.ApplyAuthorization(Http);
+            return await Http.GetFromJsonAsync<List<InventorySupplierProductDto>>(
+                $"api/inventory/suppliers/{supplierId}/products", cancellationToken) ?? [];
+        }
+
+        public Task SaveSupplierProductsAsync(
+            Guid supplierId, List<SupplierProductLineRequest> products,
+            CancellationToken cancellationToken = default) =>
+            SendNoContentAsync(() => Http.PutAsJsonAsync(
+                $"api/inventory/suppliers/{supplierId}/products",
+                new ReplaceSupplierProductsRequest(products), cancellationToken), cancellationToken);
 
         public async Task<List<InventoryBranchDto>> GetTransferDestinationsAsync(CancellationToken cancellationToken = default)
         {
@@ -6139,7 +6356,11 @@ namespace ThreadFlow.WinForms.ApiClient
 
     public sealed record InventoryProductDto(
         Guid Id, string Sku, string Name, string Color, string Size,
-        decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive);
+        decimal UnitPrice, Guid? SupplierId, string? SupplierName, int QuantityOnHand, int ReorderLevel, bool IsActive,
+        int SupplierCount = 0);
+
+    public sealed record InventoryProductSupplierOfferDto(
+        Guid SupplierId, string SupplierName, decimal UnitCost, DateTime UpdatedAtUtc);
 
     public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
 
@@ -6155,6 +6376,14 @@ namespace ThreadFlow.WinForms.ApiClient
 
     public sealed record InventorySupplierDto(
         Guid Id, string Name, string ContactName, string Email, string Phone, string Address, bool IsActive);
+
+    public sealed record InventorySupplierProductDto(
+        Guid ProductId, string Sku, string ProductName, string Color, string Size,
+        decimal UnitCost, DateTime UpdatedAtUtc, bool IsActive);
+
+    public sealed record SupplierProductLineRequest(Guid ProductId, decimal UnitCost);
+
+    public sealed record ReplaceSupplierProductsRequest(List<SupplierProductLineRequest> Products);
 
     public sealed record SaveInventorySupplierRequest(
         string Name, string? ContactName, string? Email, string? Phone, string? Address);
