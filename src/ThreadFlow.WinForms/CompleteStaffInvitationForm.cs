@@ -381,6 +381,8 @@ public sealed class CompleteStaffInvitationForm : Form
                 true);
 
             inner.BorderStyle = BorderStyle.None;
+            // A single-line box is placed by font height, so its line gets room for the tails.
+            inner.AutoSize = false;
             inner.BackColor = Palette.BackgroundSecondary.Color;
             inner.ForeColor = Palette.TextPrimary.Color;
             inner.Font = FieldFont;
@@ -404,8 +406,8 @@ public sealed class CompleteStaffInvitationForm : Form
             base.OnLayout(levent);
 
             var padding = (int)Math.Round(12 * DeviceDpi / 96f);
-            _inner.Width = Math.Max(10, Width - padding * 2);
-            _inner.Location = new Point(padding, Math.Max(0, (Height - _inner.Height) / 2));
+            var box = Theme.InputMetrics.SingleLineBox(Width, Height, _inner.Font, DeviceDpi, padding, padding);
+            _inner.SetBounds(box.X, box.Y, box.Width, box.Height);
         }
 
         protected override void OnPaint(PaintEventArgs e)

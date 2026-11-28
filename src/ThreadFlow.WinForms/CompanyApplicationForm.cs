@@ -475,6 +475,8 @@ public sealed class CompanyApplicationForm : Form
             {
                 case TextBoxBase textBox:
                     textBox.BorderStyle = BorderStyle.None;
+                    // A single-line box is placed by font height, so its line gets room for the tails.
+                    textBox.AutoSize = false;
                     break;
 
                 // The native combo always draws its own square border. Clipping one pixel
@@ -507,8 +509,17 @@ public sealed class CompanyApplicationForm : Form
             base.OnLayout(levent);
 
             var padding = (int)Math.Round(12 * DeviceDpi / 96f);
-            _inner.Width = Math.Max(10, Width - padding * 2);
-            _inner.Location = new Point(padding, Math.Max(0, (Height - _inner.Height) / 2));
+            if (_inner is TextBox { Multiline: false } textBox)
+            {
+                var box = Theme.InputMetrics.SingleLineBox(
+                    Width, Height, textBox.Font, DeviceDpi, padding, padding);
+                textBox.SetBounds(box.X, box.Y, box.Width, box.Height);
+            }
+            else
+            {
+                _inner.Width = Math.Max(10, Width - padding * 2);
+                _inner.Location = new Point(padding, Math.Max(0, (Height - _inner.Height) / 2));
+            }
 
             if (_inner is ComboBox combo)
             {

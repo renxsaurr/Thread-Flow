@@ -146,92 +146,12 @@ public sealed class InventoryCatalogController(
     }
 
     [HttpPost("receipts")]
-    public async Task<ActionResult<InventoryStockReceiptDto>> ReceiveStock(
-        [FromBody] ReceiveInventoryStockRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.Quantity <= 0)
-            return BadRequest(new { error = "Received quantity must be greater than zero." });
-        if (request.Reference?.Trim().Length > 80)
-            return BadRequest(new { error = "Reference must be 80 characters or fewer." });
-        if (!await IsAllowedBranchAsync(request.BranchId, cancellationToken))
-            return Forbid();
-
-        var product = await tenantDb.Products.SingleOrDefaultAsync(
-            item => item.Id == request.ProductId && item.IsActive, cancellationToken);
-        if (product is null)
-            return BadRequest(new { error = "Choose an active product." });
-        if (request.SupplierId is Guid supplierId &&
-            !await tenantDb.Suppliers.AnyAsync(item => item.Id == supplierId, cancellationToken))
-            return BadRequest(new { error = "The selected supplier was not found." });
-
-        var branch = await tenantDb.Branches.SingleAsync(
-            item => item.Id == request.BranchId && item.IsActive, cancellationToken);
-        var supplierName = request.SupplierId is Guid selectedSupplierId
-            ? await tenantDb.Suppliers.Where(item => item.Id == selectedSupplierId)
-                .Select(item => item.Name).SingleOrDefaultAsync(cancellationToken)
-            : null;
-
-        await using var transaction = await tenantDb.Database.BeginTransactionAsync(
-            System.Data.IsolationLevel.Serializable, cancellationToken);
-        var stock = await tenantDb.BranchProductStocks.SingleOrDefaultAsync(
-            item => item.BranchId == request.BranchId && item.ProductId == request.ProductId,
-            cancellationToken);
-        if (stock is null)
+    public IActionResult ReceiveStockOutsidePurchaseOrder() =>
+        Conflict(new
         {
-            stock = new BranchProductStock
-            {
-                BranchId = request.BranchId,
-                ProductId = request.ProductId,
-                QuantityOnHand = request.Quantity
-            };
-            tenantDb.BranchProductStocks.Add(stock);
-        }
-        else
-        {
-            try
-            {
-                stock.QuantityOnHand = checked(stock.QuantityOnHand + request.Quantity);
-            }
-            catch (OverflowException)
-            {
-                return BadRequest(new { error = "The resulting stock quantity is too large." });
-            }
-        }
-
-        var receipt = new InventoryStockReceipt
-        {
-            BranchId = request.BranchId,
-            ProductId = request.ProductId,
-            SupplierId = request.SupplierId,
-            ReceivedByUserId = Guid.TryParse(User.FindFirst("sub")?.Value, out var userId)
-                ? userId
-                : null,
-            Quantity = request.Quantity,
-            Reference = request.Reference?.Trim() ?? string.Empty,
-            ReceivedAtUtc = DateTime.UtcNow
-        };
-        tenantDb.InventoryStockReceipts.Add(receipt);
-        tenantDb.InventoryStockMovements.Add(new InventoryStockMovement
-        {
-            Type = "Stock receipt",
-            BranchId = request.BranchId,
-            ProductId = request.ProductId,
-            SupplierId = request.SupplierId,
-            Quantity = request.Quantity,
-            QuantityChange = request.Quantity,
-            Reference = receipt.Reference,
-            Notes = "Stock received outside a purchase order.",
-            PerformedByUserId = receipt.ReceivedByUserId,
-            OccurredAtUtc = receipt.ReceivedAtUtc
+            error = "Supplier stock must be received against a placed purchase order. " +
+                "Use Stock Control for opening counts or inventory corrections."
         });
-        await tenantDb.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-
-        return Ok(new InventoryStockReceiptDto(
-            receipt.Id, product.Sku, product.Name, branch.Name,
-            supplierName, receipt.Quantity, receipt.Reference, receipt.ReceivedAtUtc));
-    }
 
     [HttpPost("products")]
     public async Task<ActionResult<InventoryProductDto>> CreateProduct(
@@ -607,9 +527,6 @@ public sealed record InventoryProductSupplierOfferDto(
     Guid SupplierId, string SupplierName, decimal UnitCost, DateTime UpdatedAtUtc);
 
 public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
-
-public sealed record ReceiveInventoryStockRequest(
-    Guid BranchId, Guid ProductId, int Quantity, Guid? SupplierId, string? Reference);
 
 public sealed record InventoryStockReceiptDto(
     Guid Id, string Sku, string ProductName, string BranchName,

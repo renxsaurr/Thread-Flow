@@ -23,6 +23,11 @@ public sealed class TenantDbContext(DbContextOptions<TenantDbContext> options) :
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
     public DbSet<InventoryStockMovement> InventoryStockMovements => Set<InventoryStockMovement>();
     public DbSet<SalePayment> SalePayments => Set<SalePayment>();
+    public DbSet<CashierShift> CashierShifts => Set<CashierShift>();
+    public DbSet<HeldSale> HeldSales => Set<HeldSale>();
+    public DbSet<HeldSaleLine> HeldSaleLines => Set<HeldSaleLine>();
+    public DbSet<SaleReturn> SaleReturns => Set<SaleReturn>();
+    public DbSet<SaleReturnLine> SaleReturnLines => Set<SaleReturnLine>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -107,6 +112,12 @@ public sealed class TenantDbContext(DbContextOptions<TenantDbContext> options) :
             entity.Property(x => x.SaleNumber).HasMaxLength(40).IsRequired();
             entity.HasIndex(x => x.SaleNumber).IsUnique();
             entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
+            entity.Property(x => x.DiscountReason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.VoidReason).HasMaxLength(500);
+            entity.HasOne<CashierShift>().WithMany().HasForeignKey(x => x.CashierShiftId)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.SaleId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<Branch>().WithMany().HasForeignKey(x => x.BranchId)
@@ -140,6 +151,70 @@ public sealed class TenantDbContext(DbContextOptions<TenantDbContext> options) :
                 .WithMany(x => x.Payments)
                 .HasForeignKey(x => x.SaleId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CashierShift>(entity =>
+        {
+            entity.ToTable("CashierShifts");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.OpeningCash).HasPrecision(18, 2);
+            entity.Property(x => x.ClosingCash).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.BranchId, x.OpenedByUserId, x.Status });
+            entity.HasOne<Branch>().WithMany().HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<HeldSale>(entity =>
+        {
+            entity.ToTable("HeldSales");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.HoldNumber).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.CustomerName).HasMaxLength(160);
+            entity.HasIndex(x => x.HoldNumber).IsUnique();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.HasIndex(x => new { x.BranchId, x.Status, x.CreatedAtUtc });
+            entity.HasOne<Branch>().WithMany().HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Customer>().WithMany().HasForeignKey(x => x.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.HeldSaleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HeldSaleLine>(entity =>
+        {
+            entity.ToTable("HeldSaleLines");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.HeldSaleId, x.ProductId }).IsUnique();
+            entity.HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SaleReturn>(entity =>
+        {
+            entity.ToTable("SaleReturns");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ReturnNumber).HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.ReturnNumber).IsUnique();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.RefundAmount).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.BranchId, x.OccurredAtUtc });
+            entity.HasOne<Sale>().WithMany().HasForeignKey(x => x.SaleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Branch>().WithMany().HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.SaleReturnId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SaleReturnLine>(entity =>
+        {
+            entity.ToTable("SaleReturnLines");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
+            entity.HasOne<SaleLine>().WithMany().HasForeignKey(x => x.SaleLineId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<BranchProductStock>(entity =>

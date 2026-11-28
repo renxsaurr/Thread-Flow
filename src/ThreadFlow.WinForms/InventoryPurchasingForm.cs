@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
+using System.Drawing.Text;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using ThreadFlow.WinForms.ApiClient;
@@ -89,6 +90,7 @@ namespace ThreadFlow.WinForms
         private const string StatusColumn = "Status";
 
         private readonly InventoryCatalogApiClient _api = new();
+        private readonly bool _canTransferBranches;
 
         private readonly DataGridView _productsGrid = new();
         private readonly DataGridView _suppliersGrid = new();
@@ -102,21 +104,19 @@ namespace ThreadFlow.WinForms
         private readonly RoundedButton _newProduct = MakePrimaryButton("New product");
         private readonly RoundedButton _editProduct = MakeSecondaryButton("Edit");
         private readonly RoundedButton _viewProductOffers = MakeSecondaryButton("View supplier offers");
-        private readonly RoundedButton _receiveFromProducts = MakeSecondaryButton("Receive stock");
         private readonly RoundedButton _toggleProduct = MakeSecondaryButton("Deactivate");
         private readonly RoundedButton _printSkuLabels = MakeSecondaryButton("Print SKU labels");
         private readonly RoundedButton _newSupplier = MakePrimaryButton("New supplier");
         private readonly RoundedButton _editSupplier = MakeSecondaryButton("Edit");
         private readonly RoundedButton _toggleSupplier = MakeSecondaryButton("Deactivate");
         private readonly RoundedButton _supplierProducts = MakeSecondaryButton("Products and pricing");
-        private readonly RoundedButton _receiveFromReceipts = MakePrimaryButton("Receive stock");
         private readonly RoundedButton _newOrder = MakePrimaryButton("New draft");
         private readonly RoundedButton _editOrder = MakeSecondaryButton("Edit draft");
         private readonly RoundedButton _placeOrder = MakeSecondaryButton("Place order");
         private readonly RoundedButton _receiveOrder = MakeSecondaryButton("Receive items");
         private readonly RoundedButton _cancelOrder = MakeSecondaryButton("Cancel order");
         private readonly RoundedButton _setReorderLevel = MakeSecondaryButton("Set reorder level");
-        private readonly RoundedButton _adjustStock = MakePrimaryButton("Adjust / damaged");
+        private readonly RoundedButton _adjustStock = MakePrimaryButton("Adjust inventory");
         private readonly RoundedButton _physicalCount = MakeSecondaryButton("Physical count");
         private readonly RoundedButton _returnToSupplier = MakeSecondaryButton("Return to supplier");
         private readonly RoundedButton _transferBranch = MakeSecondaryButton("Transfer branch");
@@ -222,6 +222,8 @@ namespace ThreadFlow.WinForms
         {
             var user = ApiSession.Current?.User
                 ?? throw new InvalidOperationException("Sign in before opening the workspace.");
+            _canTransferBranches = string.Equals(user.CompanySize, "Medium", StringComparison.OrdinalIgnoreCase);
+            _transferBranch.Visible = _canTransferBranches;
 
             // Apply the shared palette first, then style our own controls the same way the
             // welcome and sign-in screens do.
@@ -249,7 +251,22 @@ namespace ThreadFlow.WinForms
             ResumeLayout(false);
             PerformLayout();
 
-            Load += async (_, _) => await RefreshAllAsync();
+            Load += async (_, _) =>
+            {
+                try
+                {
+                    var currencyCode = await new TenantCurrencyApiClient().GetCurrencyCodeAsync();
+                    TenantCurrencyFormatter.SetCurrencyCode(currencyCode);
+                    TenantCurrencyFormatter.ConfigureCurrencyColumn(
+                        _productsGrid, nameof(ProductRow.UnitPrice));
+                }
+                catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
+                {
+                    _productsHintText = "Could not load tenant currency settings; prices use PHP.";
+                }
+
+                await RefreshAllAsync();
+            };
         }
 
         private void BuildForm()
@@ -282,8 +299,9 @@ namespace ThreadFlow.WinForms
             _refresh.Click += async (_, _) => await RefreshActiveViewAsync();
 
             // Branch badge: stock levels and receipts belong to the branch this employee is assigned
-            // to, so it is shown read-only in the page header (hidden on the Suppliers page, which
-            // is not branch specific). The badge keeps its right edge next to Refresh.
+            // to, so it is shown read-only in the page header on every page (the Suppliers page shows
+            // it too, so the header stays the same shape everywhere). The badge keeps its right edge
+            // next to Refresh.
             _branchBadge.SetBounds(FormWidth - SideMargin - 110 - 12 - 200, 40, 200, 36);
             _branchBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _branchBadge.BranchName = null;
@@ -384,7 +402,6 @@ namespace ThreadFlow.WinForms
             UpdateSupplierActions();
             UpdateOrderActions();
             UpdateStockActions();
-            UpdateReceiveActions();
         }
 
         // ---- Pages ----
@@ -394,10 +411,9 @@ namespace ThreadFlow.WinForms
             var card = MakeGridCard(_productsGrid);
             var footer = MakeFooter(
                 _productsHint,
-                _newProduct, _receiveFromProducts, _editProduct, _viewProductOffers, _toggleProduct, _printSkuLabels);
+                _newProduct, _editProduct, _viewProductOffers, _toggleProduct, _printSkuLabels);
 
             _newProduct.Size = new Size(130, ButtonHeight);
-            _receiveFromProducts.Size = new Size(130, ButtonHeight);
             _editProduct.Size = new Size(80, ButtonHeight);
             _viewProductOffers.Size = new Size(168, ButtonHeight);
             _toggleProduct.Size = new Size(116, ButtonHeight);
@@ -408,7 +424,6 @@ namespace ThreadFlow.WinForms
             _viewProductOffers.Click += async (_, _) => await ShowProductSupplierOffersAsync();
             _toggleProduct.Click += async (_, _) => await ToggleProductAsync();
             _printSkuLabels.Click += (_, _) => PrintCurrentProductLabels();
-            _receiveFromProducts.Click += (_, _) => ShowReceiveDialog(CurrentProduct());
 
             AddPage(_productsPage, card, footer);
         }
@@ -434,10 +449,7 @@ namespace ThreadFlow.WinForms
         private void BuildReceiptsPage()
         {
             var card = MakeGridCard(_receiptsGrid);
-            var footer = MakeFooter(_receiptsHint, _receiveFromReceipts);
-
-            _receiveFromReceipts.Size = new Size(150, ButtonHeight);
-            _receiveFromReceipts.Click += (_, _) => ShowReceiveDialog(null);
+            var footer = MakeFooter(_receiptsHint);
 
             AddPage(_receiptsPage, card, footer);
         }
@@ -472,7 +484,7 @@ namespace ThreadFlow.WinForms
                 _setReorderLevel, _adjustStock, _physicalCount, _returnToSupplier, _transferBranch);
 
             _setReorderLevel.Size = new Size(140, ButtonHeight);
-            _adjustStock.Size = new Size(136, ButtonHeight);
+            _adjustStock.Size = new Size(150, ButtonHeight);
             _physicalCount.Size = new Size(124, ButtonHeight);
             _returnToSupplier.Size = new Size(140, ButtonHeight);
             _transferBranch.Size = new Size(128, ButtonHeight);
@@ -641,9 +653,8 @@ namespace ThreadFlow.WinForms
             _stockPage.Visible = page == InventoryPage.StockControl;
             _movementsPage.Visible = page == InventoryPage.StockHistory;
 
-            // Everything except the supplier directory is tied to the staff member's branch.
-            var branchPage = page != InventoryPage.Suppliers;
-            _branchBadge.Visible = branchPage;
+            // The badge is part of every page header, including the supplier directory.
+            _branchBadge.Visible = true;
 
             switch (page)
             {
@@ -674,7 +685,7 @@ namespace ThreadFlow.WinForms
                     break;
                 default:
                     _title.Text = "Stock receipts";
-                    _subtitle.Text = "Recent deliveries received at a branch.";
+                    _subtitle.Text = "Deliveries received against purchase orders at a branch.";
                     _receiptsGrid.Focus();
                     break;
             }
@@ -1278,7 +1289,7 @@ namespace ThreadFlow.WinForms
             AddGridColumn(_productsGrid, nameof(ProductRow.Name), "Product", fill, 160, 120, wrap: true);
             AddGridColumn(_productsGrid, nameof(ProductRow.Color), "Color", fit, 100, 70);
             AddGridColumn(_productsGrid, nameof(ProductRow.Size), "Size", fit, 100, 60);
-            AddGridColumn(_productsGrid, nameof(ProductRow.UnitPrice), "Unit price", fit, 100, 90, format: "N2", alignRight: true);
+            AddGridColumn(_productsGrid, nameof(ProductRow.UnitPrice), "Unit price", fit, 100, 90, format: "C2", alignRight: true);
             AddGridColumn(_productsGrid, nameof(ProductRow.Supplier), "Suppliers", fit, 100, 90);
             AddGridColumn(_productsGrid, nameof(ProductRow.OnHand), "On hand", fit, 100, 80, format: "N0", alignRight: true);
             AddGridColumn(_productsGrid, StatusColumn, "Status", fit, 100, 90);
@@ -1385,6 +1396,7 @@ namespace ThreadFlow.WinForms
                 DefaultCellStyle =
             {
                 Format = format ?? string.Empty,
+                FormatProvider = format == "C2" ? TenantCurrencyFormatter.Culture : null,
                 WrapMode = wrap ? DataGridViewTriState.True : DataGridViewTriState.False,
                 Alignment = alignment
             }
@@ -1528,7 +1540,6 @@ namespace ThreadFlow.WinForms
                 var choices = _branches.Select(branch => new InventoryBranchChoice(branch.Id, branch.Name)).ToList();
                 _selectedBranch = choices.FirstOrDefault(choice => choice.Id == previous) ?? choices.FirstOrDefault();
                 _branchBadge.BranchName = _selectedBranch?.Name;
-                UpdateReceiveActions();
             }
             catch (Exception exception)
             {
@@ -1656,7 +1667,7 @@ namespace ThreadFlow.WinForms
                     product.Name,
                     product.Color,
                     product.Size,
-                    product.UnitPrice.ToString("N2"),
+                    TenantCurrencyFormatter.Format(product.UnitPrice),
                     product.SupplierName,
                     product.QuantityOnHand,
                     product.IsActive ? "Active" : "Inactive"))
@@ -1994,7 +2005,8 @@ namespace ThreadFlow.WinForms
             _adjustStock.Enabled = canAdjust;
             _physicalCount.Enabled = canAdjust;
             _returnToSupplier.Enabled = canAdjust;
-            _transferBranch.Enabled = canAdjust;
+            _transferBranch.Visible = _canTransferBranches;
+            _transferBranch.Enabled = _canTransferBranches && canAdjust;
         }
 
         private void PrintCurrentProductLabels()
@@ -2012,10 +2024,9 @@ namespace ThreadFlow.WinForms
             };
 
             var form = MakeFormGrid(2);
-            AddField(form, MakeField("Labels to print", quantity, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Number of labels", quantity, required: true), 0, 0, span: 2);
             AddField(form, MakeHintPanel(
-                "Each label prints the SKU, the product name and the colour / size. " +
-                "Labels are laid out three across on the page."), 0, 1, span: 2);
+                "Each label includes the SKU, product name, color, size, and selling price."), 0, 1, span: 2);
 
             var labelsToPrint = 1;
 
@@ -2029,7 +2040,7 @@ namespace ThreadFlow.WinForms
                 "Products",
                 "Print SKU labels",
                 $"{product.Sku} — {product.Name}",
-                "Preview labels",
+                "Print labels",
                 form,
                 2 * FieldRowHeight,
                 SaveAsync);
@@ -2046,7 +2057,7 @@ namespace ThreadFlow.WinForms
                 }
                 var remaining = labelsToPrint;
                 document.BeginPrint += (_, _) => remaining = labelsToPrint;
-                document.DefaultPageSettings.Margins = new Margins(24, 24, 24, 24);
+                document.DefaultPageSettings.Margins = new Margins(LabelMargin, LabelMargin, LabelMargin, LabelMargin);
                 document.PrintPage += (_, e) =>
                 {
                     var graphics = e.Graphics;
@@ -2055,60 +2066,140 @@ namespace ThreadFlow.WinForms
                         e.Cancel = true;
                         return;
                     }
-                    var bounds = e.MarginBounds;
-                    const int columns = 3;
-                    const int labelHeight = 108;
-                    var rows = Math.Max(1, bounds.Height / labelHeight);
-                    var labelWidth = bounds.Width / columns;
-                    using var border = new Pen(TableHeaderLineColor, 0.8f);
-                    using var bandBrush = new SolidBrush(Color.FromArgb(238, 242, 252));
-                    using var skuFont = new Font("Segoe UI Semibold", 11.5F, FontStyle.Bold);
-                    using var nameFont = new Font("Segoe UI", 9F, FontStyle.Regular);
-                    using var detailFont = new Font("Segoe UI", 8.5F, FontStyle.Regular);
-                    var variation = string.Join(" · ", new[] { product.Color, product.Size }.Where(x => !string.IsNullOrWhiteSpace(x)));
-                    var price = product.UnitPrice.ToString("N2");
-                    var printed = Math.Min(remaining, columns * rows);
-                    for (var index = 0; index < printed; index++)
-                    {
-                        // Gutters keep neighbouring labels from reading as one block on the sheet.
-                        var rect = new Rectangle(bounds.Left + (index % columns) * labelWidth + 6,
-                            bounds.Top + (index / columns) * labelHeight + 6, labelWidth - 12, labelHeight - 12);
-                        var band = new Rectangle(rect.X, rect.Y, rect.Width, 28);
-                        graphics.FillRectangle(bandBrush, band);
-                        graphics.DrawRectangle(border, rect);
-                        graphics.DrawLine(border, band.Left, band.Bottom, band.Right, band.Bottom);
-                        TextRenderer.DrawText(graphics, product.Sku, skuFont,
-                            new Rectangle(band.X + 8, band.Y, band.Width - 16 - 58, band.Height), Color.Black,
-                            TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                        TextRenderer.DrawText(graphics, price, detailFont,
-                            new Rectangle(band.Right - 8 - 52, band.Y, 52, band.Height), Color.Black,
-                            TextFormatFlags.Right | TextFormatFlags.VerticalCenter |
-                            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
-                        TextRenderer.DrawText(graphics, product.Name, nameFont,
-                            new Rectangle(rect.X + 8, rect.Y + 34, rect.Width - 16, 22), Color.Black,
-                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                        TextRenderer.DrawText(graphics, variation, detailFont,
-                            new Rectangle(rect.X + 8, rect.Y + 58, rect.Width - 16, 20), Color.FromArgb(70, 75, 85),
-                            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    }
+                    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    var printed = Math.Min(remaining, LabelsPerPage(e.MarginBounds));
+                    DrawSkuLabelSheet(graphics, e.MarginBounds, product, printed);
                     remaining -= printed;
                     e.HasMorePages = remaining > 0;
                 };
-                using var preview = new PrintPreviewDialog
+
+                // Show the sheet as it will print before any paper is used.
+                using (var preview = new LabelPreviewDialog(document, product, labelsToPrint))
+                {
+                    if (preview.ShowDialog(this) != DialogResult.OK)
+                        return;
+                }
+
+                using var printDialog = new PrintDialog
                 {
                     Document = document,
-                    Text = $"SKU labels — {product.Sku}",
-                    Width = 1000,
-                    Height = 760,
-                    UseAntiAlias = true,
-                    BackColor = Palette.BackgroundSecondary.Color
+                    UseEXDialog = true,
+                    AllowPrintToFile = false,
+                    AllowSelection = false,
+                    AllowSomePages = false
                 };
-                preview.ShowDialog(this);
+                if (printDialog.ShowDialog(this) != DialogResult.OK)
+                    return;
+
+                document.Print();
+                _productsHintText = $"Sent {labelsToPrint} label(s) for {product.Sku} to the printer.";
+                RefreshHints();
             }
             catch (Exception exception)
             {
                 MessageBox.Show(this, exception.Message, "Could not prepare SKU labels", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ---- SKU labels ----
+
+        // Three labels across the printable width and as many rows as fit. The preview and the
+        // printer both read these figures, so the sheet shown is the sheet that comes out.
+        private const int LabelColumns = 3;
+        private const int LabelHeight = 108;
+        private const int LabelMargin = 24;
+
+        // Type and spacing inside one label, in the printer's hundredths of an inch. Fonts are
+        // built in those same units rather than in points, so the preview and the printer draw
+        // text at the same physical size and the preview can render it at any resolution crisply.
+        private const int LabelInset = 9;
+        private const int LabelBandHeight = 32;
+        private const float LabelSkuSize = 15f;
+        private const float LabelPriceSize = 14f;
+        private const float LabelNameSize = 12.5f;
+        private const float LabelDetailSize = 11f;
+
+        private static Font LabelFont(float size, FontStyle style, string family = "Segoe UI") =>
+            new(family, size, style, GraphicsUnit.Pixel);
+
+        private static int LabelsPerPage(Rectangle bounds) =>
+            LabelColumns * Math.Max(1, bounds.Height / LabelHeight);
+
+        /// <summary>The sheet minus its margins, in hundredths of an inch, as a page will use it.</summary>
+        private static Rectangle PrintableBounds(PageSettings settings)
+        {
+            var page = settings.Bounds;
+            var margins = settings.Margins;
+            return new Rectangle(
+                page.Left + margins.Left,
+                page.Top + margins.Top,
+                Math.Max(1, page.Width - margins.Left - margins.Right),
+                Math.Max(1, page.Height - margins.Top - margins.Bottom));
+        }
+
+        /// <summary>
+        /// Draws one sheet of SKU labels into the given rectangle. Every measure is in the
+        /// printer's hundredths of an inch, which is also the unit the preview page is drawn in.
+        /// </summary>
+        private static void DrawSkuLabelSheet(Graphics graphics, Rectangle bounds, InventoryProductDto product, int labels)
+        {
+            if (labels <= 0)
+                return;
+
+            var labelWidth = bounds.Width / LabelColumns;
+            using var border = new Pen(TableHeaderLineColor, 1f);
+            using var bandBrush = new SolidBrush(Color.FromArgb(240, 244, 252));
+            using var skuFont = LabelFont(LabelSkuSize, FontStyle.Bold);
+            using var priceFont = LabelFont(LabelPriceSize, FontStyle.Bold);
+            using var nameFont = LabelFont(LabelNameSize, FontStyle.Regular, "Segoe UI Semibold");
+            using var detailFont = LabelFont(LabelDetailSize, FontStyle.Regular);
+            using var detailBrush = new SolidBrush(Color.FromArgb(92, 99, 112));
+            using var left = new StringFormat
+            {
+                FormatFlags = StringFormatFlags.NoWrap,
+                Trimming = StringTrimming.EllipsisCharacter,
+                HotkeyPrefix = HotkeyPrefix.None,
+                LineAlignment = StringAlignment.Center
+            };
+            using var right = (StringFormat)left.Clone();
+            right.Alignment = StringAlignment.Far;
+
+            var variation = string.Join(" · ", new[] { product.Color, product.Size }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            var price = TenantCurrencyFormatter.Format(product.UnitPrice);
+            var priceWidth = (int)Math.Ceiling(graphics.MeasureString(price, priceFont, int.MaxValue, left).Width) + 4;
+
+            for (var index = 0; index < labels; index++)
+            {
+                // Gutters keep neighbouring labels from reading as one block on the sheet.
+                var rect = new Rectangle(
+                    bounds.Left + (index % LabelColumns) * labelWidth + 6,
+                    bounds.Top + (index / LabelColumns) * LabelHeight + 6,
+                    labelWidth - 12,
+                    LabelHeight - 12);
+                var band = new Rectangle(rect.X, rect.Y, rect.Width, LabelBandHeight);
+                graphics.FillRectangle(bandBrush, band);
+                graphics.DrawRectangle(border, rect);
+                graphics.DrawLine(border, band.Left, band.Bottom, band.Right, band.Bottom);
+
+                // The price reserves exactly the room its digits need on the right of the band,
+                // so a wide amount can never run into the SKU or be clipped by the border.
+                var priceBox = new Rectangle(band.Right - LabelInset - priceWidth, band.Y, priceWidth, band.Height);
+                var skuBox = new Rectangle(band.X + LabelInset, band.Y,
+                    Math.Max(1, priceBox.Left - 8 - (band.X + LabelInset)), band.Height);
+                graphics.DrawString(product.Sku, skuFont, Brushes.Black, skuBox, left);
+                graphics.DrawString(price, priceFont, Brushes.Black, priceBox, right);
+
+                var nameBox = new Rectangle(rect.X + LabelInset, rect.Y + LabelBandHeight + 8,
+                    rect.Width - LabelInset * 2, 24);
+                graphics.DrawString(product.Name, nameFont, Brushes.Black, nameBox, left);
+
+                if (variation.Length > 0)
+                {
+                    var variationBox = new Rectangle(rect.X + LabelInset, nameBox.Bottom + 2,
+                        rect.Width - LabelInset * 2, 22);
+                    graphics.DrawString(variation, detailFont, detailBrush, variationBox, left);
+                }
             }
         }
 
@@ -2120,7 +2211,6 @@ namespace ThreadFlow.WinForms
             _toggleProduct.Enabled = product is not null;
             _printSkuLabels.Enabled = product is not null;
             _toggleProduct.Text = product is { IsActive: false } ? "Reactivate" : "Deactivate";
-            UpdateReceiveActions();
         }
 
         private static string FormatSupplierCount(int count) => count switch
@@ -2137,14 +2227,6 @@ namespace ThreadFlow.WinForms
             _toggleSupplier.Enabled = supplier is not null;
             _supplierProducts.Enabled = supplier is { IsActive: true };
             _toggleSupplier.Text = supplier is { IsActive: false } ? "Reactivate" : "Deactivate";
-        }
-
-        // Receiving stock needs a branch to receive into; the product is chosen inside the dialog.
-        private void UpdateReceiveActions()
-        {
-            var hasBranch = _selectedBranch is not null;
-            _receiveFromProducts.Enabled = hasBranch;
-            _receiveFromReceipts.Enabled = hasBranch;
         }
 
         // ---- Actions ----
@@ -2262,7 +2344,7 @@ namespace ThreadFlow.WinForms
                 : Math.Min(price.Maximum, Math.Max(price.Minimum, existing.UnitPrice));
             var form = MakeFormGrid(3);
             AddField(form, MakeField("SKU", sku, required: true), 0, 0);
-            AddField(form, MakeField("Unit price", price), 1, 0);
+            AddField(form, MakeField(TenantCurrencyFormatter.FieldLabel("Unit price"), price), 1, 0);
             AddField(form, MakeField("Product name", name, required: true), 0, 1, span: 2);
             AddField(form, MakeField("Color", color), 0, 2);
             AddField(form, MakeField("Size", size), 1, 2);
@@ -2315,7 +2397,7 @@ namespace ThreadFlow.WinForms
                 var grid = new DataGridView();
                 StyleGrid(grid);
                 AddGridColumn(grid, nameof(ProductSupplierOfferRow.Supplier), "Supplier", DataGridViewAutoSizeColumnMode.Fill, 180, 140, wrap: true);
-                AddGridColumn(grid, nameof(ProductSupplierOfferRow.UnitCost), "Quoted unit cost", DataGridViewAutoSizeColumnMode.AllCells, 130, 125, format: "N2", alignRight: true);
+                AddGridColumn(grid, nameof(ProductSupplierOfferRow.UnitCost), "Quoted unit cost", DataGridViewAutoSizeColumnMode.AllCells, 130, 125, format: "C2", alignRight: true);
                 AddGridColumn(grid, nameof(ProductSupplierOfferRow.UpdatedAt), "Price updated", DataGridViewAutoSizeColumnMode.AllCells, 140, 130, format: "g");
                 grid.DataSource = offers.Select(item => new ProductSupplierOfferRow(
                     item.SupplierName, item.UnitCost, item.UpdatedAtUtc.ToLocalTime())).ToList();
@@ -2431,7 +2513,7 @@ namespace ThreadFlow.WinForms
             AddGridColumn(grid, nameof(SupplierProductEditRow.Product), "Product",
                 DataGridViewAutoSizeColumnMode.Fill, 160, 100, wrap: true);
             AddGridColumn(grid, nameof(SupplierProductEditRow.UnitCost), "Quoted unit cost",
-                DataGridViewAutoSizeColumnMode.AllCells, 120, 105, format: "N2", alignRight: true);
+                DataGridViewAutoSizeColumnMode.AllCells, 120, 105, format: "C2", alignRight: true);
             AddGridColumn(grid, nameof(SupplierProductEditRow.ProductId), "Product id",
                 DataGridViewAutoSizeColumnMode.None, 2, 2);
             var linkedRows = linked.Select(item => new SupplierProductEditRow(
@@ -2563,7 +2645,7 @@ namespace ThreadFlow.WinForms
             addProductFields.Size = new Size(bodyWidth, FieldRowHeight);
             addProductFields.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             AddField(addProductFields, MakeField("Catalog product", product), 0, 0);
-            AddField(addProductFields, MakeField("Quoted unit cost", unitCost), 1, 0);
+            AddField(addProductFields, MakeField(TenantCurrencyFormatter.FieldLabel("Quoted unit cost"), unitCost), 1, 0);
 
             saveProductPrice.Location = new Point(bodyWidth - 8 - remove.Width - 10 - saveProductPrice.Width, actionTop);
             remove.Location = new Point(bodyWidth - 8 - remove.Width, actionTop);
@@ -2625,105 +2707,6 @@ namespace ThreadFlow.WinForms
             return string.IsNullOrWhiteSpace(details) ? name : $"{name} ({details})";
         }
 
-        private void ShowReceiveDialog(InventoryProductDto? preselect)
-        {
-            if (_selectedBranch is not { } branch)
-            {
-                MessageBox.Show(this, "Choose an available branch first.", "Receive stock",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var choices = _products
-                .Where(item => item.IsActive)
-                .OrderBy(item => item.Name)
-                .Select(item => new ProductChoice(
-                    item.Id, FormatProductName(item.Name, item.Color, item.Size), item.SupplierId))
-                .ToList();
-            if (choices.Count == 0)
-            {
-                MessageBox.Show(this,
-                    "There are no active products to receive stock for. Add or reactivate a product first.",
-                    "Receive stock", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var product = new SelectBox();
-            product.DataSource = choices;
-            product.DisplayMember = nameof(ProductChoice.Label);
-            product.ValueMember = nameof(ProductChoice.Id);
-            var startIndex = preselect is null ? -1 : choices.FindIndex(choice => choice.Id == preselect.Id);
-
-            var quantity = new NumericUpDown
-            {
-                Minimum = 1,
-                Maximum = 1000000,
-                ThousandsSeparator = true
-            };
-            quantity.Value = 1;
-            var supplier = new SelectBox();
-            var reference = new TextBox { MaxLength = 80 };
-
-            // The product's primary supplier is suggested, but it can be changed for this delivery.
-            void SyncSupplier() => BindSupplierChoices(
-                supplier, (product.SelectedItem as ProductChoice)?.SupplierId, "— Unspecified supplier —");
-
-            var form = MakeFormGrid(3);
-            AddField(form, MakeField("Product", product, required: true), 0, 0, span: 2);
-            AddField(form, MakeField("Quantity received", quantity, required: true), 0, 1);
-            AddField(form, MakeField("Supplier", supplier), 1, 1);
-            AddField(form, MakeField("Reference (optional)", reference), 0, 2, span: 2);
-
-            async Task<string?> SaveAsync()
-            {
-                if (product.SelectedItem is not ProductChoice choice)
-                    return "Select an active product first.";
-
-                try
-                {
-                    var receipt = await _api.ReceiveStockAsync(new ReceiveInventoryStockRequest(
-                        branch.Id,
-                        choice.Id,
-                        decimal.ToInt32(quantity.Value),
-                        (supplier.SelectedItem as SupplierChoice)?.Id,
-                        reference.Text.Trim()));
-                    await RefreshProductsAsync(choice.Id);
-                    await RefreshReceiptsAsync();
-
-                    var message = $"Received {receipt.Quantity} unit(s) of {receipt.ProductName} at {receipt.BranchName}.";
-                    _productsHintText = message;
-                    _receiptsHintText = message;
-                    RefreshHints();
-                    return null;
-                }
-                catch (Exception exception)
-                {
-                    return DescribeError(exception);
-                }
-            }
-
-            using var dialog = new EditorDialog(
-                "Receive stock",
-                "Receive stock",
-                $"Receiving into {branch.Name}.",
-                "Receive stock",
-                form,
-                3 * FieldRowHeight,
-                SaveAsync,
-                () =>
-                {
-                    if (product.Items.Count > 0)
-                        product.SelectedIndex = startIndex >= 0 ? startIndex : 0;
-                    SyncSupplier();
-                });
-            product.SelectedIndexChanged += (_, _) =>
-            {
-                if (supplier.IsHandleCreated)
-                    SyncSupplier();
-            };
-            dialog.ShowDialog(this);
-        }
-
         // ---- Purchase orders ----
 
         private void ShowSelectedStockDetails()
@@ -2740,7 +2723,7 @@ namespace ThreadFlow.WinForms
                 $"On hand: {product.QuantityOnHand}\r\n" +
                 $"Reorder alert at: {(product.ReorderLevel > 0 ? product.ReorderLevel.ToString() : "Not set")}\r\n" +
                 $"Suppliers: {FormatSupplierCount(product.SupplierCount)}\r\n" +
-                $"Unit price: {product.UnitPrice:N2}\r\n" +
+                $"Unit price: {TenantCurrencyFormatter.Format(product.UnitPrice)}\r\n" +
                 $"Status: {(product.IsActive ? "Active" : "Inactive")}",
                 "Stock details", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -2829,27 +2812,18 @@ namespace ThreadFlow.WinForms
             supplier.DisplayMember = nameof(SupplierChoice.Label);
             supplier.ValueMember = nameof(SupplierChoice.Id);
 
+            var lines = new List<SavePurchaseOrderLineRequest>();
+            if (existing is not null)
+            {
+                foreach (var line in existing.Lines)
+                    lines.Add(new SavePurchaseOrderLineRequest(line.ProductId, line.QuantityOrdered));
+            }
+
             var expected = new DateField { AllowClear = true };
 
             var notes = new TextBox { MaxLength = 1000 };
 
             var product = new SelectBox();
-            void BindProductChoices(Guid? selectedProductId = null)
-            {
-                var choices = BuildProductChoices();
-                product.DataSource = null;
-                product.DataSource = choices;
-                product.DisplayMember = nameof(ProductChoice.Label);
-                product.ValueMember = nameof(ProductChoice.Id);
-                if (product.IsHandleCreated && product.Items.Count > 0)
-                {
-                    var selectedIndex = selectedProductId is Guid id
-                        ? choices.FindIndex(item => item.Id == id)
-                        : -1;
-                    product.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-                }
-            }
-            BindProductChoices();
 
             var quantity = new NumericUpDown
             {
@@ -2859,61 +2833,99 @@ namespace ThreadFlow.WinForms
             };
             quantity.Value = 1;
 
-            var unitCost = new NumericUpDown
+            var unitCost = new TextBox
             {
-                DecimalPlaces = 2,
-                ThousandsSeparator = true,
-                Maximum = 100000000,
-                Value = productChoices.Count > 0 && supplierUnitCosts.TryGetValue(productChoices[0].Id, out var firstCost)
-                    ? Math.Clamp(firstCost, 0, 100000000)
-                    : 0
+                ReadOnly = true,
+                TabStop = false,
+                TextAlign = HorizontalAlignment.Right,
+                ForeColor = Palette.TextSecondary.Color
             };
             var supplierPricesLoading = false;
 
-            product.SelectionChangeCommitted += (_, _) =>
+            // The quote follows the product the drop-down shows, which is tracked here: the box's
+            // own SelectedItem stays empty until its window handle exists, so reading it while the
+            // dialog is being built missed the very first product and left the field on its placeholder.
+            Guid? quotedProductId = null;
+
+            void UpdateSupplierPriceDisplay()
             {
-                if (product.SelectedItem is ProductChoice choice)
-                    unitCost.Value = supplierUnitCosts.TryGetValue(choice.Id, out var savedCost)
-                        ? Math.Clamp(savedCost, unitCost.Minimum, unitCost.Maximum)
-                        : 0;
+                if (supplierPricesLoading)
+                {
+                    unitCost.Text = "Loading supplier prices…";
+                    return;
+                }
+
+                unitCost.Text = quotedProductId is Guid productId &&
+                    supplierUnitCosts.TryGetValue(productId, out var savedCost)
+                        ? TenantCurrencyFormatter.Format(savedCost)
+                        : "No saved supplier price";
+            }
+
+            void BindProductChoices(Guid? keepProductId = null)
+            {
+                var choices = BuildProductChoices();
+                product.DataSource = null;
+                product.DataSource = choices;
+                product.DisplayMember = nameof(ProductChoice.Label);
+                product.ValueMember = nameof(ProductChoice.Id);
+
+                var selectedIndex = keepProductId is Guid id
+                    ? choices.FindIndex(item => item.Id == id)
+                    : -1;
+                if (selectedIndex < 0)
+                    selectedIndex = 0;
+
+                quotedProductId = choices.Count > 0 ? choices[selectedIndex].Id : null;
+                if (product.IsHandleCreated && product.Items.Count > 0)
+                    product.SelectedIndex = selectedIndex;
+
+                UpdateSupplierPriceDisplay();
+            }
+
+            BindProductChoices();
+
+            product.SelectedIndexChanged += (_, _) =>
+            {
+                if (product.SelectedItem is ProductChoice chosen)
+                    quotedProductId = chosen.Id;
+
+                UpdateSupplierPriceDisplay();
             };
 
             supplier.SelectionChangeCommitted += async (_, _) =>
             {
+                // A purchase order is issued to one supplier. Keep existing lines and their
+                // supplier quotes together; create a separate draft for another supplier.
+                if (lines.Count > 0)
+                    return;
+
                 if (supplier.SelectedItem is not SupplierChoice choice || choice.Id is not Guid supplierId)
                     return;
+
+                // Say straight away that the saved prices behind the quote are being reloaded.
                 supplierPricesLoading = true;
+                UpdateSupplierPriceDisplay();
                 try
                 {
                     var prices = await _api.GetSupplierProductsAsync(supplierId);
                     supplierUnitCosts.Clear();
                     foreach (var price in prices)
                         supplierUnitCosts[price.ProductId] = price.UnitCost;
-                    BindProductChoices();
-                    if (product.SelectedItem is ProductChoice selectedProduct)
-                        unitCost.Value = supplierUnitCosts.TryGetValue(selectedProduct.Id, out var savedCost)
-                            ? Math.Clamp(savedCost, unitCost.Minimum, unitCost.Maximum)
-                            : 0;
+                    supplierPricesLoading = false;
+                    BindProductChoices(quotedProductId);
                 }
                 catch (Exception exception)
                 {
                     supplierUnitCosts.Clear();
-                    unitCost.Value = 0;
                     MessageBox.Show(this, DescribeError(exception), "Could not load supplier prices",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally
                 {
                     supplierPricesLoading = false;
+                    UpdateSupplierPriceDisplay();
                 }
             };
-
-            var lines = new List<SavePurchaseOrderLineRequest>();
-            if (existing is not null)
-            {
-                foreach (var line in existing.Lines)
-                    lines.Add(new SavePurchaseOrderLineRequest(line.ProductId, line.QuantityOrdered, line.UnitCost));
-            }
 
             var linesGrid = new DataGridView();
             StyleGrid(linesGrid);
@@ -2924,10 +2936,11 @@ namespace ThreadFlow.WinForms
             AddGridColumn(linesGrid, nameof(OrderLineRow.Quantity), "Quantity",
                 DataGridViewAutoSizeColumnMode.AllCells, 100, 80, format: "N0", alignRight: true);
             AddGridColumn(linesGrid, nameof(OrderLineRow.UnitCost), "Unit cost",
-                DataGridViewAutoSizeColumnMode.AllCells, 100, 90, format: "N2", alignRight: true);
+                DataGridViewAutoSizeColumnMode.AllCells, 100, 90, format: "C2", alignRight: true);
 
             void BindLines()
             {
+                supplier.Enabled = lines.Count == 0;
                 linesGrid.DataSource = null;
                 linesGrid.DataSource = lines
                     .Select(line =>
@@ -2937,7 +2950,9 @@ namespace ThreadFlow.WinForms
                             match?.Sku ?? "—",
                             match?.Name ?? "Unknown product",
                             line.Quantity,
-                            line.UnitCost);
+                            supplierUnitCosts.TryGetValue(line.ProductId, out var savedCost)
+                                ? savedCost
+                                : existing?.Lines.FirstOrDefault(item => item.ProductId == line.ProductId)?.UnitCost ?? 0m);
                     })
                     .ToList();
             }
@@ -2977,7 +2992,7 @@ namespace ThreadFlow.WinForms
                 }
 
                 lines.Add(new SavePurchaseOrderLineRequest(
-                    choice.Id, decimal.ToInt32(quantity.Value), unitCost.Value));
+                    choice.Id, decimal.ToInt32(quantity.Value)));
                 BindLines();
             };
 
@@ -3009,7 +3024,7 @@ namespace ThreadFlow.WinForms
             AddField(fields, MakeField("Expected delivery (optional)", expected), 1, 0);
             AddField(fields, MakeField("Item to add", product, required: true), 0, 1, span: 2);
             AddField(fields, MakeField("Quantity", quantity, required: true), 0, 2);
-            AddField(fields, MakeField("Supplier price per unit", unitCost), 1, 2);
+            AddField(fields, MakeField(TenantCurrencyFormatter.FieldLabel("Supplier quote (read-only)"), unitCost), 1, 2);
             AddField(fields, MakeField("Notes (optional)", notes), 0, 3, span: 2);
             fields.Dock = DockStyle.Top;
             fields.Height = 4 * FieldRowHeight;
@@ -3024,6 +3039,8 @@ namespace ThreadFlow.WinForms
             {
                 if (supplier.SelectedItem is not SupplierChoice choice || choice.Id is not Guid supplierId)
                     return "Choose the supplier for this order.";
+                if (expected.Value is DateTime expectedDate && expectedDate.Date < DateTime.Today)
+                    return "Expected delivery cannot be before today.";
                 if (lines.Count == 0)
                     return "Add at least one product line.";
 
@@ -3053,7 +3070,7 @@ namespace ThreadFlow.WinForms
                 existing is null ? "New purchase order" : "Edit purchase order",
                 existing is null ? "New draft" : "Edit draft",
                 existing is null
-                    ? $"Drafting an order for {branch.Name}. Saved supplier prices fill the unit cost."
+                    ? $"Drafting an order for {branch.Name}. Each order is for one supplier; create a separate draft for each supplier. Prices come from saved quotes."
                     : $"Updating {existing.Number} for {branch.Name}.",
                 "Save draft",
                 body,
@@ -3284,7 +3301,7 @@ namespace ThreadFlow.WinForms
             var reference = new TextBox { MaxLength = 80 };
 
             var form = MakeFormGrid(3);
-            AddField(form, MakeField("Quantity change (negative writes off)", change, required: true), 0, 0, span: 2);
+            AddField(form, MakeField("Quantity change (+ adds, − removes)", change, required: true), 0, 0, span: 2);
             AddField(form, MakeField("Reason", reason, required: true), 0, 1, span: 2);
             AddField(form, MakeField("Reference (optional)", reference), 0, 2, span: 2);
 
@@ -3313,9 +3330,9 @@ namespace ThreadFlow.WinForms
 
             using var dialog = new EditorDialog(
                 "Stock control",
-                "Adjust stock",
+                "Inventory adjustment",
                 $"{product.Sku} — {product.Name}. On hand: {product.QuantityOnHand}.",
-                "Adjust stock",
+                "Save adjustment",
                 form,
                 3 * FieldRowHeight,
                 SaveAsync);
@@ -3460,6 +3477,9 @@ namespace ThreadFlow.WinForms
 
         private async Task TransferBranchAsync()
         {
+            if (!_canTransferBranches)
+                return;
+
             if (_selectedBranch is not { } branch || CurrentStock() is not { } product)
                 return;
 
@@ -3845,6 +3865,9 @@ namespace ThreadFlow.WinForms
                 {
                     case TextBox textBox:
                         textBox.BorderStyle = BorderStyle.None;
+                        // A single-line box is placed by font height in OnLayout, so the text
+                        // line can be centred with room under it for the tails of g, j, p, q, y.
+                        textBox.AutoSize = false;
                         break;
                     case NumericUpDown numeric:
                         numeric.BorderStyle = BorderStyle.None;
@@ -3867,6 +3890,17 @@ namespace ThreadFlow.WinForms
                 var scale = DeviceDpi / 96f;
                 var left = (int)Math.Round(10 * scale);
                 var right = (int)Math.Round((_input is ComboBox ? 12 : _input is TextBox ? 10 : 4) * scale);
+
+                if (_input is TextBox { Multiline: false } textBox)
+                {
+                    // Size the box from the font, not its default height: a default-height box
+                    // leaves a single pixel under the glyphs and cuts the tails off g, j, p, q, y.
+                    var box = Theme.InputMetrics.SingleLineBox(
+                        Width, Height, textBox.Font, DeviceDpi, left, right);
+                    textBox.SetBounds(box.X, box.Y, box.Width, box.Height);
+                    return;
+                }
+
                 var height = _input.Height;
                 _input.SetBounds(
                     left,
@@ -4366,7 +4400,9 @@ namespace ThreadFlow.WinForms
             {
                 _selected = selected?.Date;
                 _allowClear = allowClear;
-                var anchor = _selected ?? DateTime.Today;
+                var anchor = _selected is DateTime selectedDate && selectedDate.Date >= DateTime.Today
+                    ? selectedDate
+                    : DateTime.Today;
                 _month = new DateTime(anchor.Year, anchor.Month, 1);
 
                 Theme.ThreadFlowTheme.Apply(this);
@@ -4473,6 +4509,11 @@ namespace ThreadFlow.WinForms
 
             private void ShiftMonth(int months)
             {
+                if (months < 0 && _month <= new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1))
+                    return;
+                if (months > 0 && _month.Year == DateTime.MaxValue.Year && _month.Month == DateTime.MaxValue.Month)
+                    return;
+
                 _month = _month.AddMonths(months);
                 _hoverIndex = -1;
                 Invalidate();
@@ -4497,7 +4538,8 @@ namespace ThreadFlow.WinForms
                     _nextBounds.Contains(e.Location) ||
                     _todayBounds.Contains(e.Location) ||
                     (!_clearBounds.IsEmpty && _clearBounds.Contains(e.Location));
-                Cursor = overAction || index >= 0 ? Cursors.Hand : Cursors.Default;
+                var dayIsSelectable = index >= 0 && FirstCell.AddDays(index).Date >= DateTime.Today;
+                Cursor = overAction || dayIsSelectable ? Cursors.Hand : Cursors.Default;
                 base.OnMouseMove(e);
             }
 
@@ -4516,7 +4558,8 @@ namespace ThreadFlow.WinForms
 
                 if (_previousBounds.Contains(e.Location))
                 {
-                    ShiftMonth(-1);
+                    if (_month > new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1))
+                        ShiftMonth(-1);
                     return;
                 }
 
@@ -4540,7 +4583,11 @@ namespace ThreadFlow.WinForms
 
                 var index = DayIndexAt(e.Location);
                 if (index >= 0)
-                    Choose(FirstCell.AddDays(index));
+                {
+                    var date = FirstCell.AddDays(index);
+                    if (date.Date >= DateTime.Today)
+                        Choose(date);
+                }
             }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -4570,8 +4617,10 @@ namespace ThreadFlow.WinForms
                     Palette.TextPrimary.Color,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
 
-                PaintChevron(g, _previousBounds, pointsLeft: true);
-                PaintChevron(g, _nextBounds, pointsLeft: false);
+                PaintChevron(g, _previousBounds, pointsLeft: true,
+                    enabled: _month > new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+                PaintChevron(g, _nextBounds, pointsLeft: false,
+                    enabled: !(_month.Year == DateTime.MaxValue.Year && _month.Month == DateTime.MaxValue.Month));
 
                 // Weekday captions.
                 var weekdayTop = pad + headerHeight;
@@ -4600,7 +4649,8 @@ namespace ThreadFlow.WinForms
                     var date = first.AddDays(index);
                     var cell = CellBounds(index);
                     var inMonth = date.Month == _month.Month && date.Year == _month.Year;
-                    var selected = _selected == date.Date;
+                    var isPast = date.Date < DateTime.Today;
+                    var selected = !isPast && _selected == date.Date;
                     var today = date == DateTime.Today;
                     var circle = new Rectangle(
                         cell.X + (cell.Width - diameter) / 2,
@@ -4613,7 +4663,7 @@ namespace ThreadFlow.WinForms
                         using var fill = new SolidBrush(Palette.Primary.Color);
                         g.FillEllipse(fill, circle);
                     }
-                    else if (index == _hoverIndex)
+                    else if (!isPast && index == _hoverIndex)
                     {
                         using var fill = new SolidBrush(BrandTints.iceBlue.Color);
                         g.FillEllipse(fill, circle);
@@ -4625,6 +4675,7 @@ namespace ThreadFlow.WinForms
                     }
 
                     var color = selected ? Palette.BackgroundSecondary.Color
+                        : isPast ? Palette.TextSecondary.Color
                         : inMonth ? Palette.TextPrimary.Color
                         : Palette.TextSecondary.Color;
                     TextRenderer.DrawText(
@@ -4678,10 +4729,10 @@ namespace ThreadFlow.WinForms
                 return bounds;
             }
 
-            private void PaintChevron(Graphics g, Rectangle bounds, bool pointsLeft)
+            private void PaintChevron(Graphics g, Rectangle bounds, bool pointsLeft, bool enabled)
             {
                 var scale = DpiScale;
-                using var pen = new Pen(Palette.TextSecondary.Color, MathF.Max(1f, 1.4f * scale))
+                using var pen = new Pen(enabled ? Palette.TextSecondary.Color : TableLineColor, MathF.Max(1f, 1.4f * scale))
                 {
                     StartCap = LineCap.Round,
                     EndCap = LineCap.Round,
@@ -4888,6 +4939,217 @@ namespace ThreadFlow.WinForms
                         _save.Enabled = true;
                         _cancel.Enabled = true;
                     }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The label sheet as it will come out of the printer, page by page, before any paper is
+        /// used. Closing keeps everything untouched; Print labels carries on to the printer.
+        /// </summary>
+        private sealed class LabelPreviewDialog : Form
+        {
+            private const int DialogWidth = 860;
+            private const int PreferredPreviewHeight = 500;
+            private static readonly Color PreviewSurface = Color.FromArgb(236, 240, 247);
+
+            private readonly PrintDocument _document;
+            private readonly InventoryProductDto _product;
+            private readonly int _labels;
+            private readonly int _perPage;
+            private readonly int _pages;
+            private readonly Panel _paper;
+            private readonly LabelSheetView _sheet = new();
+            private readonly Label _pageLabel = new();
+            private readonly Theme.DialogButton _previous = new("Previous", primary: false);
+            private readonly Theme.DialogButton _next = new("Next", primary: false);
+            private int _pageIndex;
+
+            internal LabelPreviewDialog(PrintDocument document, InventoryProductDto product, int labels)
+            {
+                _document = document;
+                _product = product;
+                _labels = labels;
+
+                var printable = PrintableBounds(document.DefaultPageSettings);
+                _perPage = Math.Max(1, LabelsPerPage(printable));
+                _pages = Math.Max(1, (labels + _perPage - 1) / _perPage);
+
+                Theme.DialogChrome.Prepare(this);
+                SuspendLayout();
+
+                var pad = Theme.DialogChrome.Pad;
+                var innerWidth = DialogWidth - pad * 2;
+                var bodyTop = Theme.DialogChrome.HeaderHeight + 20;
+
+                // Keep the card on screen: on a short display the sheet area gives up the room
+                // the footer needs, instead of pushing the buttons off the card.
+                var previewHeight = PreferredPreviewHeight;
+                var workArea = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.WorkingArea;
+                var dpi = DeviceDpi > 0 ? DeviceDpi : 96;
+                var maxHeight = Math.Max(480, (int)Math.Round(workArea.Height * 96f / dpi) - 48);
+                var fixedHeight = bodyTop + 12 + 30 + 12 + 1 + 20 + Theme.DialogChrome.ButtonHeight + pad;
+                if (fixedHeight + previewHeight > maxHeight)
+                    previewHeight = Math.Max(240, maxHeight - fixedHeight);
+
+                var pagerTop = bodyTop + previewHeight + 12;
+                var dividerTop = pagerTop + 30 + 12;
+                var buttonTop = dividerTop + 20;
+
+                Text = "Print SKU labels";
+                ClientSize = new Size(DialogWidth, buttonTop + Theme.DialogChrome.ButtonHeight + pad);
+
+                var header = Theme.DialogChrome.CreateHeader(
+                    this,
+                    "SKU labels",
+                    $"{product.Sku} — {product.Name} · {labels} label(s) · {_perPage} fit on a page",
+                    DialogWidth);
+
+                // Paper at close to its real size: as wide as the card allows, with the rest of
+                // the sheet reached by the scrollbar instead of shrinking the labels to nothing.
+                var paperSize = document.DefaultPageSettings.PaperSize;
+                var scale = Math.Min(1f, (innerWidth - 24 - SystemInformation.VerticalScrollBarWidth) / (float)Math.Max(1, paperSize.Width));
+
+                _paper = new Panel
+                {
+                    Location = new Point(pad, bodyTop),
+                    Size = new Size(innerWidth, previewHeight),
+                    BackColor = PreviewSurface,
+                    AutoScroll = true
+                };
+
+                _sheet.Location = new Point(6, 6);
+                _sheet.Size = new Size(
+                    Math.Max(1, (int)Math.Round(paperSize.Width * scale)),
+                    Math.Max(1, (int)Math.Round(paperSize.Height * scale)));
+                _paper.Controls.Add(_sheet);
+
+                _pageLabel.Font = Theme.DialogChrome.SubtitleFont;
+                _pageLabel.ForeColor = Theme.DialogChrome.MutedColor;
+                _pageLabel.BackColor = Color.Transparent;
+                _pageLabel.AutoSize = false;
+                _pageLabel.TextAlign = ContentAlignment.MiddleLeft;
+                _pageLabel.Location = new Point(pad, pagerTop);
+                _pageLabel.Size = new Size(120, 30);
+
+                _previous.Size = new Size(96, 30);
+                _previous.Location = new Point(pad + 124, pagerTop);
+                _previous.Click += (_, _) => ShowPage(_pageIndex - 1);
+
+                _next.Size = new Size(96, 30);
+                _next.Location = new Point(pad + 124 + 96 + 8, pagerTop);
+                _next.Click += (_, _) => ShowPage(_pageIndex + 1);
+
+                var print = new Theme.DialogButton("Print labels", primary: true) { DialogResult = DialogResult.OK };
+                print.Location = new Point(DialogWidth - pad - print.Width, buttonTop);
+
+                var close = new Theme.DialogButton("Close", primary: false) { DialogResult = DialogResult.Cancel };
+                close.Location = new Point(print.Left - 12 - close.Width, buttonTop);
+
+                var divider = Theme.DialogChrome.CreateDivider(DialogWidth, dividerTop);
+
+                Controls.AddRange([header, _paper, _pageLabel, _previous, _next, divider, close, print]);
+
+                AutoScaleDimensions = new SizeF(96F, 96F);
+                AutoScaleMode = AutoScaleMode.Dpi;
+
+                ResumeLayout(false);
+                PerformLayout();
+
+                AcceptButton = print;
+                CancelButton = close;
+
+                ShowPage(0);
+            }
+
+            private void ShowPage(int index)
+            {
+                _pageIndex = Math.Clamp(index, 0, _pages - 1);
+                _pageLabel.Text = _pages == 1 ? "1 page" : $"Page {_pageIndex + 1} of {_pages}";
+                _previous.Enabled = _pageIndex > 0;
+                _next.Enabled = _pageIndex < _pages - 1;
+
+                // The last page usually carries fewer labels than a full sheet.
+                var labelsOnPage = Math.Min(_perPage, _labels - _pageIndex * _perPage);
+                _sheet.ShowPage(RenderSheet(labelsOnPage));
+
+                // Every page starts at the top of the paper.
+                _paper.AutoScrollPosition = Point.Empty;
+            }
+
+            private Bitmap RenderSheet(int labelsOnPage)
+            {
+                var settings = _document.DefaultPageSettings;
+                var paperSize = settings.PaperSize;
+
+                // Rendered well above screen resolution and scaled back down by the control, so
+                // the small label type stays sharp instead of looking blocky on screen.
+                const float SuperSample = 2.5f;
+                var page = new Bitmap(
+                    Math.Max(1, (int)Math.Round(paperSize.Width * SuperSample)),
+                    Math.Max(1, (int)Math.Round(paperSize.Height * SuperSample)));
+                page.SetResolution(100f * SuperSample, 100f * SuperSample);
+                using (var graphics = Graphics.FromImage(page))
+                {
+                    // Bitmap world units are pixels, so this maps the sheet's hundredths of an
+                    // inch onto the supersampled pixels the preview is drawn with.
+                    graphics.ScaleTransform(SuperSample, SuperSample);
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    graphics.Clear(Color.White);
+                    DrawSkuLabelSheet(graphics, PrintableBounds(settings), _product, labelsOnPage);
+                }
+
+                return page;
+            }
+
+            /// <summary>The white sheet itself, drawn from the same renderer the printer uses.</summary>
+            private sealed class LabelSheetView : Control
+            {
+                private Bitmap? _page;
+
+                internal LabelSheetView()
+                {
+                    SetStyle(
+                        ControlStyles.UserPaint |
+                        ControlStyles.AllPaintingInWmPaint |
+                        ControlStyles.OptimizedDoubleBuffer |
+                        ControlStyles.ResizeRedraw,
+                        true);
+                    BackColor = Color.White;
+                }
+
+                internal void ShowPage(Bitmap page)
+                {
+                    var previous = _page;
+                    _page = page;
+                    previous?.Dispose();
+                    Invalidate();
+                }
+
+                protected override void OnPaint(PaintEventArgs e)
+                {
+                    e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    if (_page is null)
+                    {
+                        e.Graphics.Clear(BackColor);
+                        return;
+                    }
+
+                    e.Graphics.DrawImage(_page, new Rectangle(Point.Empty, ClientSize));
+                }
+
+                protected override void Dispose(bool disposing)
+                {
+                    if (disposing)
+                    {
+                        _page?.Dispose();
+                        _page = null;
+                    }
+
+                    base.Dispose(disposing);
                 }
             }
         }
@@ -6233,12 +6495,6 @@ namespace ThreadFlow.WinForms.ApiClient
                 $"api/inventory/receipts?branchId={branchId}", cancellationToken) ?? [];
         }
 
-        public Task<InventoryStockReceiptDto> ReceiveStockAsync(
-            ReceiveInventoryStockRequest request, CancellationToken cancellationToken = default) =>
-            SendAsync<InventoryStockReceiptDto>(
-                () => Http.PostAsJsonAsync("api/inventory/receipts", request, cancellationToken),
-                cancellationToken);
-
         public async Task<List<InventorySupplierDto>> GetSuppliersAsync(CancellationToken cancellationToken = default)
         {
             ApiSession.ApplyAuthorization(Http);
@@ -6364,9 +6620,6 @@ namespace ThreadFlow.WinForms.ApiClient
 
     public sealed record InventoryBranchDto(Guid Id, string Code, string Name);
 
-    public sealed record ReceiveInventoryStockRequest(
-        Guid BranchId, Guid ProductId, int Quantity, Guid? SupplierId, string? Reference);
-
     public sealed record InventoryStockReceiptDto(
         Guid Id, string Sku, string ProductName, string BranchName,
         string? SupplierName, int Quantity, string Reference, DateTime ReceivedAtUtc);
@@ -6392,7 +6645,7 @@ namespace ThreadFlow.WinForms.ApiClient
 
     public sealed record InventoryPurchaseOrderLineDto(Guid Id, Guid ProductId, string Sku, string ProductName, int QuantityOrdered, int QuantityReceived, decimal UnitCost);
     public sealed record InventoryPurchaseOrderDto(Guid Id, string Number, Guid BranchId, Guid SupplierId, string SupplierName, string Status, DateTime CreatedAtUtc, DateTime? ExpectedAtUtc, DateTime? OrderedAtUtc, string Notes, IReadOnlyList<InventoryPurchaseOrderLineDto> Lines);
-    public sealed record SavePurchaseOrderLineRequest(Guid ProductId, int Quantity, decimal UnitCost);
+    public sealed record SavePurchaseOrderLineRequest(Guid ProductId, int Quantity);
     public sealed record SavePurchaseOrderRequest(Guid BranchId, Guid SupplierId, DateTime? ExpectedAtUtc, string? Notes, List<SavePurchaseOrderLineRequest> Lines);
     public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, int Quantity);
     public sealed record ReceivePurchaseOrderRequest(string? Reference, List<ReceivePurchaseOrderLineRequest> Lines);

@@ -73,6 +73,7 @@ public sealed class TenantOwnerManagerForm : Form
     private readonly CustomerInteractionsApiClient _interactionsApi = new();
     private readonly SalesReportsApiClient _reportsApi = new();
     private readonly TenantBranchesApiClient _branchesApi = new();
+    private readonly TenantCurrencyApiClient _currencyApi = new();
 
     // What this account can use, decided by its roles.
     private readonly bool _isOwnerManager;
@@ -224,6 +225,15 @@ public sealed class TenantOwnerManagerForm : Form
 
         Load += async (_, _) =>
         {
+            try
+            {
+                TenantCurrencyFormatter.SetCurrencyCode(await _currencyApi.GetCurrencyCodeAsync());
+            }
+            catch (HttpRequestException)
+            {
+                // Keep the default PHP display if tenant settings cannot be reached.
+            }
+
             if (_canManageBranches)
                 await RefreshBranchesAsync();
 
@@ -1254,7 +1264,7 @@ public sealed class TenantOwnerManagerForm : Form
                 _isBranchManager ? (Guid)_reportBranch.SelectedValue! : null);
             _saleCount.Value = $"{report.SaleCount}";
             _unitsSold.Value = $"{report.UnitsSold}";
-            _totalSales.Value = $"{report.TotalSalesAmount:C2}";
+            _totalSales.Value = TenantCurrencyFormatter.Format(report.TotalSalesAmount);
             _reportStatus.Text = "Report loaded.";
         }
         catch (HttpRequestException exception)

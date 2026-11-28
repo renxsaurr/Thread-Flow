@@ -391,6 +391,119 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.ToTable("Branches", (string)null);
                 });
 
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.CashierShift", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ClosingCash")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("OpenedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OpenedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("OpeningCash")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId", "OpenedByUserId", "Status");
+
+                    b.ToTable("CashierShifts", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.HeldSale", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CashierUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)");
+
+                    b.Property<string>("HoldNumber")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("ResumedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("HoldNumber")
+                        .IsUnique();
+
+                    b.HasIndex("BranchId", "Status", "CreatedAtUtc");
+
+                    b.ToTable("HeldSales", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.HeldSaleLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HeldSaleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("HeldSaleId", "ProductId")
+                        .IsUnique();
+
+                    b.ToTable("HeldSaleLines", (string)null);
+                });
+
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.Product", b =>
                 {
                     b.Property<Guid>("Id")
@@ -446,8 +559,23 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.Property<Guid>("BranchId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("CashierShiftId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CashierUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("DiscountReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("datetime2");
@@ -457,13 +585,30 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("VoidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("VoidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
+
+                    b.HasIndex("CashierShiftId");
 
                     b.HasIndex("CustomerId");
 
@@ -531,6 +676,78 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.HasIndex("SaleId");
 
                     b.ToTable("SalePayments", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.SaleReturn", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RefundAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ReturnNumber")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<Guid>("SaleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReturnNumber")
+                        .IsUnique();
+
+                    b.HasIndex("SaleId");
+
+                    b.HasIndex("BranchId", "OccurredAtUtc");
+
+                    b.ToTable("SaleReturns", (string)null);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.SaleReturnLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("SaleLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SaleReturnId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SaleLineId");
+
+                    b.HasIndex("SaleReturnId");
+
+                    b.ToTable("SaleReturnLines", (string)null);
                 });
 
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Crm.CustomerInteraction", b =>
@@ -651,6 +868,44 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.CashierShift", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.HeldSale", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Crm.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.HeldSaleLine", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.HeldSale", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("HeldSaleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.Product", b =>
                 {
                     b.HasOne("ThreadFlow.Domain.Modules.Inventory.Supplier", null)
@@ -666,6 +921,11 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .HasForeignKey("BranchId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.CashierShift", null)
+                        .WithMany()
+                        .HasForeignKey("CashierShiftId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("ThreadFlow.Domain.Modules.Crm.Customer", null)
                         .WithMany()
@@ -697,7 +957,42 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.SaleReturn", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Management.Branch", null)
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.Sale", null)
+                        .WithMany()
+                        .HasForeignKey("SaleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.SaleReturnLine", b =>
+                {
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.SaleLine", null)
+                        .WithMany()
+                        .HasForeignKey("SaleLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ThreadFlow.Domain.Modules.Sales.SaleReturn", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("SaleReturnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ThreadFlow.Domain.Modules.Inventory.PurchaseOrder", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.HeldSale", b =>
                 {
                     b.Navigation("Lines");
                 });
@@ -707,6 +1002,11 @@ namespace ThreadFlow.Infrastructure.Migrations.Tenant
                     b.Navigation("Lines");
 
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("ThreadFlow.Domain.Modules.Sales.SaleReturn", b =>
+                {
+                    b.Navigation("Lines");
                 });
 #pragma warning restore 612, 618
         }

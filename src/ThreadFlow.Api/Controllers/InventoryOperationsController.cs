@@ -39,12 +39,8 @@ public sealed class InventoryOperationsController(
     [HttpGet("transfer-destinations")]
     public async Task<ActionResult<IReadOnlyList<InventoryBranchDto>>> GetTransferDestinations(CancellationToken ct)
     {
-        if (IsBranchEnabled())
-        {
-            return Ok(await db.Branches.AsNoTracking().Where(b => b.IsActive).OrderBy(b => b.Name)
-                .Select(b => new InventoryBranchDto(b.Id, b.Code, b.Name)).ToListAsync(ct));
-        }
-        await TenantBranchDefaults.EnsureMainBranchAsync(db, ct);
+        if (!IsBranchEnabled()) return Forbid();
+
         return Ok(await db.Branches.AsNoTracking().Where(b => b.IsActive).OrderBy(b => b.Name)
             .Select(b => new InventoryBranchDto(b.Id, b.Code, b.Name)).ToListAsync(ct));
     }
@@ -55,6 +51,7 @@ public sealed class InventoryOperationsController(
     {
         var error = await ValidatePurchaseOrderAsync(request, ct);
         if (error is not null) return BadRequest(new { error });
+        var supplierPrices = await GetSupplierPricesAsync(request.SupplierId, request.Lines, ct);
         var now = DateTime.UtcNow;
         var order = new PurchaseOrder
         {
@@ -68,7 +65,7 @@ public sealed class InventoryOperationsController(
             {
                 ProductId = x.ProductId,
                 QuantityOrdered = x.Quantity,
-                UnitCost = x.UnitCost
+                UnitCost = supplierPrices[x.ProductId]
             }).ToList()
         };
         db.PurchaseOrders.Add(order);
@@ -86,6 +83,7 @@ public sealed class InventoryOperationsController(
         if (order.BranchId != request.BranchId || !await IsAllowedBranchAsync(order.BranchId, ct)) return Forbid();
         var error = await ValidatePurchaseOrderAsync(request, ct);
         if (error is not null) return BadRequest(new { error });
+        var supplierPrices = await GetSupplierPricesAsync(request.SupplierId, request.Lines, ct);
         order.SupplierId = request.SupplierId;
         order.ExpectedAtUtc = request.ExpectedAtUtc;
         order.Notes = request.Notes?.Trim() ?? string.Empty;
@@ -94,7 +92,7 @@ public sealed class InventoryOperationsController(
         db.PurchaseOrderLines.AddRange(request.Lines.Select(x => new PurchaseOrderLine
         {
             PurchaseOrderId = order.Id, ProductId = x.ProductId,
-            QuantityOrdered = x.Quantity, UnitCost = x.UnitCost
+            QuantityOrdered = x.Quantity, UnitCost = supplierPrices[x.ProductId]
         }));
         await db.SaveChangesAsync(ct);
         return Ok(await ToDtoAsync(order.Id, ct));
@@ -107,6 +105,8 @@ public sealed class InventoryOperationsController(
         if (order is null) return NotFound(new { error = "Purchase order not found." });
         if (!await IsAllowedBranchAsync(order.BranchId, ct)) return Forbid();
         if (order.Status != "Draft") return Conflict(new { error = "Only a draft can be placed." });
+        if (order.ExpectedAtUtc is DateTime expected && expected.ToLocalTime().Date < DateTime.Today)
+            return BadRequest(new { error = "Expected delivery date has passed. Edit the draft and choose today or a future date before placing it." });
         order.Status = "Ordered";
         order.OrderedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -249,6 +249,7 @@ public sealed class InventoryOperationsController(
     [HttpPost("stock/transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferInventoryStockRequest request, CancellationToken ct)
     {
+        if (!IsBranchEnabled()) return Forbid();
         if (!await IsAllowedBranchAsync(request.FromBranchId, ct)) return Forbid();
         if (request.FromBranchId == request.ToBranchId) return BadRequest(new { error = "Choose a different destination branch." });
         if (!await db.Branches.AnyAsync(x => x.Id == request.ToBranchId && x.IsActive, ct)) return BadRequest(new { error = "Destination branch not found or inactive." });
@@ -295,13 +296,30 @@ public sealed class InventoryOperationsController(
         if (!await IsAllowedBranchAsync(request.BranchId, ct)) return "The selected branch is not available to your account.";
         if (!await db.Suppliers.AnyAsync(x => x.Id == request.SupplierId && x.IsActive, ct)) return "Choose an active supplier.";
         if (request.Lines.Count == 0 || request.Lines.Count > 100) return "A purchase order must contain 1 to 100 lines.";
-        if (request.Lines.Any(x => x.Quantity <= 0 || x.UnitCost < 0 || x.UnitCost > 9999999999999999.99m)) return "Line quantities must be positive and unit costs must fit within the supported price range.";
+        if (request.Lines.Any(x => x.Quantity <= 0)) return "Line quantities must be positive.";
         if (request.Lines.GroupBy(x => x.ProductId).Any(g => g.Count() > 1)) return "A product can only appear once in an order.";
         if (request.Notes?.Trim().Length > 1000) return "Notes must be 1,000 characters or fewer.";
-        if (request.ExpectedAtUtc is DateTime expected && expected < DateTime.UtcNow.Date.AddDays(-1)) return "Expected date cannot be in the past.";
+        if (request.ExpectedAtUtc is DateTime expected && expected.ToLocalTime().Date < DateTime.Today) return "Expected date cannot be in the past.";
         var ids = request.Lines.Select(x => x.ProductId).Distinct().ToArray();
-        return await db.Products.CountAsync(x => ids.Contains(x.Id) && x.IsActive, ct) == ids.Length
-            ? null : "Every order line must reference an active product.";
+        if (await db.Products.CountAsync(x => ids.Contains(x.Id) && x.IsActive, ct) != ids.Length)
+            return "Every order line must reference an active product.";
+
+        var linkedProducts = await db.SupplierProducts.AsNoTracking()
+            .Where(item => item.SupplierId == request.SupplierId && ids.Contains(item.ProductId))
+            .Select(item => item.ProductId)
+            .ToListAsync(ct);
+        return linkedProducts.Count == ids.Length
+            ? null
+            : "Every product must have a saved price for the selected supplier. Manage supplier prices from the Suppliers page.";
+    }
+
+    private async Task<Dictionary<Guid, decimal>> GetSupplierPricesAsync(
+        Guid supplierId, IReadOnlyCollection<PurchaseOrderLineRequest> lines, CancellationToken ct)
+    {
+        var productIds = lines.Select(line => line.ProductId).Distinct().ToArray();
+        return await db.SupplierProducts.AsNoTracking()
+            .Where(item => item.SupplierId == supplierId && productIds.Contains(item.ProductId))
+            .ToDictionaryAsync(item => item.ProductId, item => item.UnitCost, ct);
     }
 
     private async Task<PurchaseOrderDto?> ToDtoAsync(Guid id, CancellationToken ct) =>
@@ -354,7 +372,7 @@ public sealed class InventoryOperationsController(
     }
 }
 
-public sealed record PurchaseOrderLineRequest(Guid ProductId, int Quantity, decimal UnitCost);
+public sealed record PurchaseOrderLineRequest(Guid ProductId, int Quantity);
 public sealed record SavePurchaseOrderRequest(Guid BranchId, Guid SupplierId, DateTime? ExpectedAtUtc, string? Notes, List<PurchaseOrderLineRequest> Lines);
 public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, int Quantity);
 public sealed record ReceivePurchaseOrderRequest(string? Reference, List<ReceivePurchaseOrderLineRequest> Lines);

@@ -10,6 +10,9 @@ public static class ThreadFlowRoles
     public const string CustomerServiceAgent = "CustomerServiceAgent";
     public const string InventoryPurchasingStaff = "InventoryPurchasingStaff";
 
+    public const string TenantWorkspaceUsers = TenantAdmin + "," + TenantOwnerManager + "," +
+        BranchManager + "," + SalesClerk + "," + CustomerServiceAgent + "," + InventoryPurchasingStaff;
+
     public static readonly IReadOnlyList<string> TenantAssignableEmployeeRoles =
     [
         SalesClerk,

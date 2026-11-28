@@ -1242,6 +1242,7 @@ public sealed class TenantAdminForm : Form
             _receiptHeader.Text = settings.ReceiptHeader ?? string.Empty;
             _receiptFooter.Text = settings.ReceiptFooter ?? string.Empty;
             _currency.Text = settings.CurrencyCode;
+            TenantCurrencyFormatter.SetCurrencyCode(settings.CurrencyCode);
         }
         catch (Exception exception)
         {
@@ -1261,6 +1262,7 @@ public sealed class TenantAdminForm : Form
                 _contactEmail.Text.Trim(), EmptyToNull(_phone.Text), _taxRate.Value,
                 EmptyToNull(_receiptHeader.Text), EmptyToNull(_receiptFooter.Text),
                 _currency.Text.Trim().ToUpperInvariant()));
+            TenantCurrencyFormatter.SetCurrencyCode(_currency.Text);
             _settingsStatus.Text = "Company settings saved.";
         }
         catch (Exception exception)

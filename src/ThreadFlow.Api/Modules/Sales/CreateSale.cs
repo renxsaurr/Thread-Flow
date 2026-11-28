@@ -10,7 +10,11 @@ public sealed record CreateSalePaymentCommand(PaymentMethod Method, decimal Amou
 
 public sealed record CreateSaleCommand(
     Guid BranchId,
+    Guid CashierShiftId,
+    Guid CashierUserId,
     Guid? CustomerId,
+    decimal DiscountAmount,
+    string DiscountReason,
     IReadOnlyList<CreateSaleLineCommand> Lines,
     IReadOnlyList<CreateSalePaymentCommand> Payments);
 
@@ -38,6 +42,13 @@ public sealed class CreateSale(TenantDbContext db)
         if (command.Payments.Any(payment => payment.Amount <= 0))
             throw new ArgumentException("Each payment amount must be greater than zero.");
 
+        if (command.DiscountAmount < 0)
+            throw new ArgumentException("Discount cannot be negative.");
+        if (command.DiscountAmount > 0 && string.IsNullOrWhiteSpace(command.DiscountReason))
+            throw new ArgumentException("Enter the promotion or discount reason.");
+        if (command.DiscountReason?.Trim().Length > 500)
+            throw new ArgumentException("Discount reason must be 500 characters or fewer.");
+
         if (command.Payments.Any(payment =>
                 !Enum.IsDefined(typeof(PaymentMethod), payment.Method)))
         {
@@ -50,6 +61,14 @@ public sealed class CreateSale(TenantDbContext db)
 
         if (!branchIsActive)
             throw new ArgumentException("The selected branch does not exist or is inactive.");
+
+        var shiftIsOpen = await db.CashierShifts.AnyAsync(
+            shift => shift.Id == command.CashierShiftId && shift.BranchId == command.BranchId &&
+                shift.OpenedByUserId == command.CashierUserId && shift.Status == "Open" &&
+                shift.ClosedAtUtc == null,
+            cancellationToken);
+        if (!shiftIsOpen)
+            throw new ArgumentException("Open a cashier shift at this branch before completing a sale.");
 
         if (command.CustomerId is Guid customerId &&
             !await db.Customers.AnyAsync(
@@ -105,6 +124,10 @@ public sealed class CreateSale(TenantDbContext db)
             };
         }).ToList();
 
+        var subtotal = saleLines.Sum(line => line.LineTotal);
+        if (command.DiscountAmount > subtotal)
+            throw new ArgumentException("Discount cannot exceed the sale subtotal.");
+
         var saleNumber =
             $"TF-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..8]}";
 
@@ -112,8 +135,12 @@ public sealed class CreateSale(TenantDbContext db)
         {
             SaleNumber = saleNumber,
             BranchId = command.BranchId,
+            CashierShiftId = command.CashierShiftId,
+            CashierUserId = command.CashierUserId,
             CustomerId = command.CustomerId,
-            TotalAmount = saleLines.Sum(line => line.LineTotal),
+            DiscountAmount = command.DiscountAmount,
+            DiscountReason = command.DiscountReason?.Trim() ?? string.Empty,
+            TotalAmount = subtotal - command.DiscountAmount,
             Lines = saleLines,
             Payments = command.Payments.Select(payment => new SalePayment
             {
@@ -129,6 +156,21 @@ public sealed class CreateSale(TenantDbContext db)
         }
 
         db.Sales.Add(sale);
+        foreach (var line in sale.Lines)
+        {
+            db.InventoryStockMovements.Add(new ThreadFlow.Domain.Modules.Inventory.InventoryStockMovement
+            {
+                Type = "Sale",
+                BranchId = command.BranchId,
+                ProductId = line.ProductId,
+                Quantity = line.Quantity,
+                QuantityChange = -line.Quantity,
+                Reference = saleNumber,
+                Notes = "Stock reduced by completed sale.",
+                PerformedByUserId = command.CashierUserId,
+                OccurredAtUtc = sale.OccurredAtUtc
+            });
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
